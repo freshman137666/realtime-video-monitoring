@@ -62,6 +62,7 @@ def predict_img():
 
                 # Perform the detection
                 model = YOLO('yolov8n.pt')
+                # 对于图片，我们仍然使用检测模式，因为追踪主要用于视频
                 detections = model(img, save=True)
 
                 # Find the latest subdirectory in the 'runs/detect' folder
@@ -100,13 +101,31 @@ def predict_img():
                     if not ret:
                         break
 
-                    # do YOLOv9 detection on the frame here
-                    # model = YOLO('yolov9c.pt')
-                    results = model(frame, save=True)  # working
+                    # 将检测模式改为追踪模式
+                    results = model.track(frame, persist=True)  # persist=True 保持ID一致性
                     print(results)
                     cv2.waitKey(1)
 
+                    # 获取处理后的帧（带有检测框的）
                     res_plotted = results[0].plot()
+                    
+                    # 如果有追踪结果，在画面上显示追踪ID
+                    if hasattr(results[0], 'boxes') and hasattr(results[0].boxes, 'id') and results[0].boxes.id is not None:
+                        boxes = results[0].boxes.xyxy.cpu().numpy()
+                        ids = results[0].boxes.id.int().cpu().numpy()
+                        classes = results[0].boxes.cls.cpu().numpy()
+                        
+                        # 获取类别名称
+                        class_names = model.names
+                        
+                        for box, id, cls in zip(boxes, ids, classes):
+                            x1, y1, x2, y2 = box
+                            class_name = class_names[int(cls)]
+                            # 在每个目标上方显示ID和类别
+                            label = f"ID:{id} {class_name}"
+                            cv2.putText(res_plotted, label, (int(x1), int(y1)-10), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
                     cv2.imshow("result", res_plotted)
 
                     # write the frame to the output video
@@ -189,22 +208,39 @@ def webcam_feed():
     cap = cv2.VideoCapture(0) # 0 for camera
 
     def generate():
+        # 初始化YOLO模型
+        model = YOLO("yolov8n.pt")
+        
         while True:
             success, frame = cap.read()
             if not success:
                 break
 
-            # Perform object detection on the frame
-            img = Image.fromarray(frame)
-            model = YOLO("yolov8n.pt")
-            results = model(img, save=True)
+            # 使用追踪模式而不是检测模式
+            results = model.track(frame, persist=True)  # persist=True 保持ID一致性
 
-            # Plot the detected objects on the frame
+            # 获取处理后的帧（带有检测框的）
             res_plotted = results[0].plot()
-            img_BGR = cv2.cvtColor(res_plotted, cv2.COLOR_RGB2BGR)
+            
+            # 如果有追踪结果，在画面上显示追踪ID
+            if hasattr(results[0], 'boxes') and hasattr(results[0].boxes, 'id') and results[0].boxes.id is not None:
+                boxes = results[0].boxes.xyxy.cpu().numpy()
+                ids = results[0].boxes.id.int().cpu().numpy()
+                classes = results[0].boxes.cls.cpu().numpy()
+                
+                # 获取类别名称
+                class_names = model.names
+                
+                for box, id, cls in zip(boxes, ids, classes):
+                    x1, y1, x2, y2 = box
+                    class_name = class_names[int(cls)]
+                    # 在每个目标上方显示ID和类别
+                    label = f"ID:{id} {class_name}"
+                    cv2.putText(res_plotted, label, (int(x1), int(y1)-10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-            # Convert the frame to JPEG format for streaming
-            ret, buffer = cv2.imencode(".jpg", img_BGR)
+            # 转换为JPEG格式用于流式传输
+            ret, buffer = cv2.imencode(".jpg", res_plotted)
             frame = buffer.tobytes()
 
             yield (
