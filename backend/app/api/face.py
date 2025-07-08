@@ -6,6 +6,33 @@ from io import BytesIO
 from PIL import Image
 from flask import request, current_app, jsonify
 from flask_restx import Namespace, Resource, fields
+import dlib
+import face_recognition
+
+# --- dlib 模型初始化 ---
+# 定义模型文件路径
+# 我们假设这些模型文件被放在了 backend/dat/ 目录下
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'dat')
+SHAPE_PREDICTOR_PATH = os.path.join(MODEL_DIR, 'shape_predictor_68_face_landmarks.dat')
+FACE_REC_MODEL_PATH = os.path.join(MODEL_DIR, 'dlib_face_recognition_resnet_model_v1.dat')
+
+# 检查模型文件是否存在
+if not os.path.exists(SHAPE_PREDICTOR_PATH) or not os.path.exists(FACE_REC_MODEL_PATH):
+    print("="*50)
+    print("警告: Dlib 模型文件未找到！")
+    print(f"请将 'shape_predictor_68_face_landmarks.dat' 和 'dlib_face_recognition_resnet_model_v1.dat' 文件下载并放置在以下目录中:")
+    print(f"'{os.path.abspath(MODEL_DIR)}'")
+    print("你可以从 http://dlib.net/files/ 下载。")
+    print("人脸识别功能将无法正常工作。")
+    print("="*50)
+    # 设置模型为None，以避免在没有模型的情况下崩溃
+    detector, sp, facerec = None, None, None
+else:
+    # 加载dlib的人脸检测器和模型
+    detector = dlib.get_frontal_face_detector()
+    sp = dlib.shape_predictor(SHAPE_PREDICTOR_PATH)
+    facerec = dlib.face_recognition_model_v1(FACE_REC_MODEL_PATH)
+    print("Dlib 人脸识别模型加载成功。")
 
 # 创建人脸API的命名空间
 ns = Namespace('face', description='人脸识别相关操作')
@@ -24,7 +51,7 @@ face_recognition_result = ns.model('FaceRecognitionResult', {
 })
 
 # 注册的人脸数据文件路径
-REGISTERED_FACES_FILE = os.path.join(os.getcwd(), 'registered_faces.json')
+REGISTERED_FACES_FILE = os.path.join(os.getcwd(), '..', 'registered_faces.json')
 
 # 初始化人脸数据文件
 def init_face_data():
@@ -69,31 +96,35 @@ class FaceRegister(Resource):
     @ns.expect(face_register_model)
     def post(self):
         """注册人脸"""
+        if not all([detector, sp, facerec]):
+             return {'error': 'Dlib模型未加载，无法注册人脸'}, 500
+
         data = request.json
         student_id = data['student_id']
         image_data = data['image']
         
         # 解码Base64图像
         try:
-            # 去除可能存在的Base64前缀
             if ',' in image_data:
                 image_data = image_data.split(',')[1]
-                
             image = Image.open(BytesIO(base64.b64decode(image_data)))
             image_np = np.array(image)
+            # dlib需要BGR格式，但Pillow默认是RGB，不过很多时候dlib也能处理
+            # 如果检测效果不好，可以尝试转换： image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
         except Exception as e:
             return {'error': f'图像解码失败: {str(e)}'}, 400
         
-        # 检测人脸
-        faces = detect_face(image_np)
+        # 使用dlib检测人脸
+        faces = detector(image_np, 1)
         if len(faces) != 1:
-            return {'error': '没有检测到人脸或检测到多个人脸'}, 400
+            return {'error': f'未检测到人脸或检测到多个人脸 (检测到 {len(faces)} 个)'}, 400
         
-        # 计算人脸特征向量
-        face_descriptor = compute_face_descriptor(image_np, faces[0])
+        # 获取人脸关键点并计算特征向量
+        shape = sp(image_np, faces[0])
+        face_descriptor = facerec.compute_face_descriptor(image_np, shape)
         
-        # 将人脸特征向量转换为列表（以便JSON序列化）
-        face_descriptor_list = face_descriptor.tolist()
+        # 将dlib的vector转换为numpy数组，再转为列表以便JSON序列化
+        face_descriptor_list = [x for x in face_descriptor]
         
         # 加载已注册的人脸数据
         registered_faces = load_registered_faces()
@@ -115,46 +146,54 @@ class FaceRecognize(Resource):
     @ns.marshal_with(face_recognition_result)
     def post(self):
         """识别人脸"""
+        if not all([detector, sp, facerec]):
+             return {'error': 'Dlib模型未加载，无法识别人脸'}, 500
+
         data = request.json
         image_data = data['image']
         
         # 解码Base64图像
         try:
-            # 去除可能存在的Base64前缀
             if ',' in image_data:
                 image_data = image_data.split(',')[1]
-                
             image = Image.open(BytesIO(base64.b64decode(image_data)))
             image_np = np.array(image)
         except Exception as e:
             return {'error': f'图像解码失败: {str(e)}'}, 400
         
         # 检测人脸
-        faces = detect_face(image_np)
-        if len(faces) != 1:
-            return {'recognized': False, 'student_id': '', 'confidence': 0.0}
+        faces = detector(image_np, 1)
+        if len(faces) == 0:
+            return {'recognized': False, 'student_id': '未检测到人脸', 'confidence': 0.0}
         
-        # 计算人脸特征向量
-        face_descriptor = compute_face_descriptor(image_np, faces[0])
+        # 我们只处理检测到的第一个人脸
+        face = faces[0]
+        shape = sp(image_np, face)
+        query_descriptor = np.array(facerec.compute_face_descriptor(image_np, shape))
         
         # 加载已注册的人脸数据
         registered_faces = load_registered_faces()
-        
-        # 如果没有注册的人脸，直接返回未识别
         if not registered_faces:
-            return {'recognized': False, 'student_id': '', 'confidence': 0.0}
+            return {'recognized': False, 'student_id': '陌生人 (数据库为空)', 'confidence': 0.0}
         
-        # 比较人脸
-        known_descriptors = list(registered_faces.values())
+        # 准备数据进行比对
+        known_descriptors = [np.array(desc) for desc in registered_faces.values()]
         student_ids = list(registered_faces.keys())
         
-        matches = compare_faces(known_descriptors, face_descriptor)
+        # 使用face_recognition库的函数进行比对
+        # 它计算欧氏距离并与阈值比较
+        matches = face_recognition.compare_faces(known_descriptors, query_descriptor, tolerance=0.4)
         
-        # 查找最匹配的人脸
+        # 查找匹配结果
         if True in matches:
-            match_index = matches.index(True)
-            student_id = student_ids[match_index]
-            confidence = 0.8  # 假设置信度为0.8
-            return {'recognized': True, 'student_id': student_id, 'confidence': confidence}
-        else:
-            return {'recognized': False, 'student_id': '', 'confidence': 0.0} 
+            # 如果有多个匹配，我们可以找到距离最近的那个
+            face_distances = face_recognition.face_distance(known_descriptors, query_descriptor)
+            best_match_index = np.argmin(face_distances)
+            
+            if matches[best_match_index]:
+                student_id = student_ids[best_match_index]
+                # 将距离转换为置信度（非线性转换）
+                confidence = 1.0 - face_distances[best_match_index]
+                return {'recognized': True, 'student_id': student_id, 'confidence': confidence}
+
+        return {'recognized': False, 'student_id': '陌生人', 'confidence': 0.0} 

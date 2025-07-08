@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import HomeView from '../views/HomeView.vue'
-import MonitorView from '../views/MonitorView.vue'
+
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -8,7 +7,7 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: MonitorView  // 将监控视图设置为默认页面
+      component: () => import('../views/HomeView.vue')  // 将监控视图设置为默认页面
     },
     {
       path: '/about',
@@ -21,8 +20,13 @@ const router = createRouter({
     {
       path: '/monitor',
       name: 'monitor',
-      component: MonitorView
-    }
+      component: () => import('../views/MonitorView.vue')
+    },
+    {
+    path: '/alart',
+    name: 'alart',
+    component: () => import('../views/AlertView.vue')
+    },
   ]
 })
 
