@@ -21,6 +21,8 @@ from werkzeug.utils import secure_filename, send_from_directory
 
 from ultralytics import YOLO
 
+# 解决 "OMP: Error #15" 警告
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 app = Flask(__name__)
 CORS(app)  # 启用跨域支持
@@ -647,6 +649,9 @@ def serve_file(filename):
     return send_from_directory(UPLOADS_DIR, filename)
 
 if __name__ == "__main__":
+    # 解决 "OMP: Error #15" 警告
+    os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+    
     parser = argparse.ArgumentParser(description="Flask API exposing YOLOv8 models")
     parser.add_argument("--port", default=5000, type=int, help="port number")
     parser.add_argument("--host", default="0.0.0.0", help="host address")
