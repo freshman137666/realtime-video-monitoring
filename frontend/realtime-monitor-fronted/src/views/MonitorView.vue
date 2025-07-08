@@ -150,7 +150,8 @@ const updateSettings = async () => {
 
 // 连接摄像头流
 const connectWebcam = () => {
-  videoSource.value = VIDEO_FEED_URL
+  // 关键修复：添加时间戳来防止浏览器缓存
+  videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`
   activeSource.value = 'webcam'
   startAlertPolling()
 }
