@@ -6,12 +6,22 @@
       <div class="video-container">
         <h2>监控视图</h2>
         <div class="video-wrapper">
-          <img v-if="videoSource && isImageUrl(videoSource)" :src="videoSource" alt="图像" />
-          <video v-else-if="videoSource && isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+          <!-- Case 1: Webcam is active -->
+          <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" />
+          
+          <!-- Case 2: An upload is active, so we check its type -->
+          <template v-else-if="activeSource === 'upload'">
+              <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
+              <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+          </template>
+
+          <!-- Case 3: Loading -->
           <div v-else-if="activeSource === 'loading'" class="loading-state">
             <p>正在处理文件，请稍候...</p>
             <div class="loading-spinner"></div>
           </div>
+          
+          <!-- Case 4: Default placeholder -->
           <div v-else class="video-placeholder">
             <p>加载中或未连接视频源</p>
           </div>
@@ -215,7 +225,7 @@ const toggleEditMode = async () => {
     // 进入编辑模式
     try {
       // 保存原始危险区域以便取消时恢复
-      const response = await fetch(`${API_BASE_URL}/get_danger_zone`)
+      const response = await fetch(`${API_BASE_URL}/config`)
       const data = await response.json()
       originalDangerZone.value = data.danger_zone
       
@@ -237,7 +247,7 @@ const toggleEditMode = async () => {
     // 退出编辑模式，保存更改
     try {
       // 获取更新后的危险区域
-      const response = await fetch(`${API_BASE_URL}/get_danger_zone`)
+      const response = await fetch(`${API_BASE_URL}/config`)
       const data = await response.json()
       
       // 保存新的危险区域
@@ -299,12 +309,13 @@ const cancelEdit = async () => {
 
 // 判断URL是否为图像
 const isImageUrl = (url) => {
-  return url.includes('/api/video_feed') || url.includes('.jpg') || url.includes('.jpeg')
+  const lowerUrl = url.toLowerCase();
+  return lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg')
 }
 
 // 判断URL是否为视频
 const isVideoUrl = (url) => {
-  return url.includes('.mp4')
+  return url.toLowerCase().includes('.mp4')
 }
 
 // 定期轮询告警信息
