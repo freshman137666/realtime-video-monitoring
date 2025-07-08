@@ -12,6 +12,8 @@ import datetime
 import json
 from collections import defaultdict
 import math
+import dlib
+from .face import registered_faces, detector, sp, facerec  # 从face.py导入所需变量和模型
 
 # 创建视频API的命名空间
 ns = Namespace('video', description='视频流处理相关操作')
@@ -132,131 +134,86 @@ def distance_to_polygon(point, polygon):
     
     return min_distance
 
+# 视频处理和推流的核心函数
 def gen_frames(stream_id):
-    """生成视频帧"""
-    global DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD, target_loitering_time, last_detection_time
+    """
+    从RTMP流读取视频，进行实时人脸识别，并生成帧。
+    """
+    stream_url = f'rtmp://127.0.0.1:9090/live/{stream_id}' # 根据老师要求，将端口修改为9090
+    # 注意：这里的IP地址127.0.0.1表示RTMP服务器与后端服务运行在同一台机器上
     
-    # 在实际项目中，这里应该根据stream_id从RTMP服务器获取视频流
-    # 为了快速适配前端，我们暂时使用默认摄像头
-    cap = cv2.VideoCapture(0)  # 使用本地摄像头
+    cap = cv2.VideoCapture(stream_url)
     
-    # 设置分辨率为480*480
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    # 按照老师要求设置帧率和跳帧
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640) # 稍微调大一点以获得更好效果
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    
-    frame_skip = 3  # 跳过的帧数
+    frame_skip = 5  # 跳过的帧数
     frame_count = 0
-    
+
+    if not cap.isOpened():
+        print(f"错误：无法打开RTMP视频流: {stream_url}")
+        # 如果无法打开，可以返回一个提示错误的图片
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(img, f"Cannot open stream: {stream_id}", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        _, buffer = cv2.imencode('.jpg', img)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        return
+
     while True:
         success, frame = cap.read()
         if not success:
+            print("视频流结束或读取失败。")
             break
-            
-        if frame_count % frame_skip == 0:
-            # 当前时间戳
-            current_time = time.time()
-            time_diff = current_time - last_detection_time
-            last_detection_time = current_time
-            
-            # 目标检测
-            if yolo_model:
-                # 使用YOLO进行目标检测
-                results = yolo_model.predict(frame, classes=TARGET_CLASSES, verbose=False)
-                
-                # 在图像上绘制危险区域
-                cv2.polylines(frame, [DANGER_ZONE], True, (0, 0, 255), 2)
-                
-                # 处理每个检测到的对象
-                if len(results) > 0:
-                    boxes = results[0].boxes
-                    
-                    for i, box in enumerate(boxes):
-                        # 获取检测框坐标
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        
-                        # 计算底部中点坐标（假设物体站在地面上）
-                        bottom_center = (int((x1 + x2) / 2), y2)
-                        
-                        # 检查是否在危险区域内
-                        in_danger_zone = point_in_polygon(bottom_center, DANGER_ZONE)
-                        
-                        # 计算到危险区域边缘的距离
-                        distance = distance_to_polygon(bottom_center, DANGER_ZONE)
-                        
-                        # 获取物体类别
-                        cls = int(box.cls[0])
-                        confidence = float(box.conf[0])
-                        
-                        # 获取类别名称
-                        class_name = yolo_model.names[cls]
-                        
-                        # 设置绘制颜色和告警状态
-                        color = (0, 255, 0)  # 默认绿色
-                        alarm_text = ""
-                        
-                        # 对象唯一标识，用于跟踪停留时间
-                        obj_id = f"{cls}_{i}_{x1}_{y1}"
-                        
-                        if in_danger_zone:
-                            # 更新对象在危险区域的停留时间
-                            if obj_id in target_loitering_time:
-                                target_loitering_time[obj_id] += time_diff
-                            else:
-                                target_loitering_time[obj_id] = 0
-                                
-                            # 如果停留时间超过阈值，触发告警
-                            if target_loitering_time[obj_id] > LOITERING_THRESHOLD:
-                                color = (0, 0, 255)  # 红色表示告警
-                                alarm_text = f"ALARM: {class_name} in danger zone"
-                                
-                                # 生成告警记录
-                                # 保存告警截图
-                                timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-                                image_filename = f"alert_{timestamp}.jpg"
-                                image_path = os.path.join(os.getcwd(), "uploads", image_filename)
-                                
-                                # 确保uploads文件夹存在
-                                os.makedirs(os.path.join(os.getcwd(), "uploads"), exist_ok=True)
-                                
-                                cv2.imwrite(image_path, frame)
-                                
-                                # 创建告警记录
-                                alert = Alert(
-                                    alert_type="入侵危险区域",
-                                    description=f"{class_name}进入危险区域并停留{target_loitering_time[obj_id]:.1f}秒",
-                                    image_path=image_filename
-                                )
-                                
-                                # 在实际项目中，这里应该将告警记录添加到数据库
-                                # db.session.add(alert)
-                                # db.session.commit()
-                        elif distance < SAFETY_DISTANCE:
-                            color = (0, 165, 255)  # 橙色表示警告
-                            alarm_text = f"WARNING: {class_name} near danger zone"
-                        else:
-                            # 如果物体不在危险区域，重置停留时间
-                            target_loitering_time[obj_id] = 0
-                        
-                        # 绘制边界框
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                        
-                        # 绘制类别名称和置信度
-                        label = f"{class_name} {confidence:.2f}"
-                        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                        
-                        # 绘制告警文本
-                        if alarm_text:
-                            cv2.putText(frame, alarm_text, (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-            
-            # 编码图像
-            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-            frame_bytes = buffer.tobytes()
-            
-            # 构造响应体
-            yield (b'--frame\r\n'
-                  b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        
+
         frame_count += 1
+        if frame_count % frame_skip == 0:
+            # 1. 转换为灰度图像
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # 2. 检测人脸
+            faces = detector(gray, 0) # 使用0表示不进行上采样，加快速度
+
+            for face in faces:
+                # 获取人脸关键点
+                shape = sp(frame, face)
+                # 计算人脸的128维编码
+                face_encoding = np.array(facerec.compute_face_descriptor(frame, shape))
+                
+                # 比较捕获的人脸与已注册人脸库中的编码
+                if registered_faces: # 确保库不为空
+                    known_face_encodings = list(registered_faces.values())
+                    student_ids = list(registered_faces.keys())
+                    
+                    matches = np.linalg.norm(np.array(known_face_encodings) - face_encoding, axis=1) <= 0.4
+                    
+                    name = "Stranger"
+                    color = (0, 0, 255)  # 默认红色标记陌生人
+
+                    if True in matches:
+                        first_match_index = np.argmin(matches) if np.any(matches) else -1
+                        if matches[first_match_index]:
+                            student_id = student_ids[first_match_index]
+                            name = student_id
+                            color = (0, 255, 0)  # 绿色标记已注册人脸
+
+                    # 在人脸周围绘制矩形框
+                    (x, y, w, h) = (face.left(), face.top(), face.width(), face.height())
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                    # 添加文本标签
+                    cv2.putText(frame, name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+
+        # 3. 编码图像并推流
+        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        if not ret:
+            continue
+            
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+    cap.release()
+
 
 # 定义API路由
 @ns.route('/feed/<string:stream_id>')
@@ -264,9 +221,8 @@ def gen_frames(stream_id):
 class VideoFeed(Resource):
     @ns.doc('get_video_feed')
     def get(self, stream_id):
-        """获取实时视频流"""
-        return Response(gen_frames(stream_id),
-                       mimetype='multipart/x-mixed-replace; boundary=frame')
+        """视频推流接口，处理指定ID的RTMP流并返回实时人脸识别结果"""
+        return Response(gen_frames(stream_id), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @ns.route('/config')
 class VideoConfig(Resource):

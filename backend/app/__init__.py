@@ -20,8 +20,9 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
 
-    # 在这里可以注册蓝图
+    # 注册API蓝图
+    # Flask-RESTX的Api对象会自动处理URL前缀，所以这里不需要指定
     from .api import api_bp
-    app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(api_bp)
 
     return app 
