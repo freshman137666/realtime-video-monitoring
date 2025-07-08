@@ -23,9 +23,19 @@ const router = createRouter({
       component: () => import('../views/MonitorView.vue')
     },
     {
-    path: '/alart',
-    name: 'alart',
+    path: '/alert',
+    name: 'alert',
     component: () => import('../views/AlertView.vue')
+    },
+    {
+    path: '/face',
+    name: 'face',
+    component: () => import('../views/FaceRecognition.vue')
+    },
+    {
+    path: '/device',
+    name: 'device',
+    component: () => import('../views/DeviceView.vue')
     },
   ]
 })

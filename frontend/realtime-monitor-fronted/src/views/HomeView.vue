@@ -7,8 +7,10 @@
         <div class="control-section">
           <h3>操作选项</h3>
           <div class="button-group">
+            <button @click="goToFaceRecognitionPage" :class="{ active: false }">入站人脸</button>
             <button @click="goToMonitorPage" :class="{ active: false }">监控大屏</button>
             <button @click="goToAlertPage" :class="{ active: false }">警报处置</button>
+            <button @click="goToDevicePage" :class="{ active: false }">设备信息</button>
           </div>
         </div>
       </div>
@@ -30,7 +32,7 @@
         </div>
         <div class="control-section">
           <h3>菜单</h3>
-          <div class="button-group">
+          <div class="button-group vertical">
             <button @click="goToAboutPage">关于</button>
             <button @click="logout">退出登录</button>
           </div>
@@ -56,8 +58,16 @@ const goToAlertPage = () => {
   router.push('/alert');
 };
 
+const goToFaceRecognitionPage = () => {
+  router.push('/face');
+};
+
 const goToAboutPage = () => {
   router.push('/about');
+};
+
+const goToDevicePage = () => {
+  router.push('/device');
 };
 
 const logout = () => {
@@ -113,6 +123,10 @@ h3 {
   display: flex;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.button-group.vertical {
+  flex-direction: column;
 }
 
 button {
