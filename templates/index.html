@@ -20,7 +20,41 @@
 <!-- Daterange picker -->
 <link rel="stylesheet" href="/static/assets/plugins/daterangepicker/daterangepicker.css">
 <!-- summernote -->
-<link rel="stylesheet" href="/static/assets/plugins/summernote/summernote-bs4.min.css"> {% endblock stylesheets %} {% block content %} <div class="content-wrapper">
+<link rel="stylesheet" href="/static/assets/plugins/summernote/summernote-bs4.min.css">
+<style>
+  .alert-box {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 20px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 10px;
+    background-color: #f8f9fa;
+  }
+  .alert-item {
+    padding: 8px;
+    margin-bottom: 5px;
+    border-radius: 3px;
+  }
+  .alert-danger {
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+    color: #721c24;
+  }
+  .alert-warning {
+    background-color: #fff3cd;
+    border-color: #ffeeba;
+    color: #856404;
+  }
+  .danger-zone-info {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #e9ecef;
+    border-radius: 5px;
+    font-size: 0.9em;
+  }
+</style>
+{% endblock stylesheets %} {% block content %} <div class="content-wrapper">
   <!-- Content Header (Page header) -->
   <div class="content-header">
     <div class="container-fluid">
@@ -76,6 +110,31 @@
                     <button class="btn btn-block btn-default btn-sm " type="submit">Upload</button>
                     <p class="mt-5 mb-3 text-muted">Built using Pytorch & Flask</p>
                   </form>
+                  
+                  <!-- 危险区域信息 -->
+                  <div class="danger-zone-info">
+                    <h5>Danger Zone Detection</h5>
+                    <p>The system detects if objects enter the predefined danger zone and displays alerts below.</p>
+                    <ul>
+                      <li><strong style="color: green;">Green</strong>: Safe status</li>
+                      <li><strong style="color: #FFFF00;">Yellow</strong>: Near danger zone</li>
+                      <li><strong style="color: red;">Red</strong>: Staying in danger zone too long</li>
+                    </ul>
+                  </div>
+                  
+                  <!-- 告警信息区域 -->
+                  <div class="alert-box">
+                    <h5>Alert Messages</h5>
+                    <div id="alerts-container">
+                      {% if alerts %}
+                        {% for alert in alerts %}
+                          <div class="alert-item alert-danger">{{ alert }}</div>
+                        {% endfor %}
+                      {% else %}
+                        <p>No alerts at the moment</p>
+                      {% endif %}
+                    </div>
+                  </div>
                 </div>
               </div>
               <!-- /.card-body -->
@@ -171,4 +230,30 @@
 <!-- AdminLTE dashboard demo (This is only for demo purposes) -->
 <script src="/static/assets/js/pages/dashboard.js"></script>
 <!-- AdminLTE for demo purposes -->
-<script src="/static/assets/js/demo.js"></script> {% endblock javascripts %}
+<script src="/static/assets/js/demo.js"></script>
+
+<!-- 实时更新告警信息的脚本 -->
+<script>
+  // 只在使用摄像头时定期更新告警信息
+  if (document.getElementById("my-video-image").style.display !== "none") {
+    // 每3秒更新一次告警信息
+    setInterval(function() {
+      fetch('/get_alerts')
+        .then(response => response.json())
+        .then(data => {
+          const alertsContainer = document.getElementById('alerts-container');
+          if (data.alerts && data.alerts.length > 0) {
+            let alertsHtml = '';
+            data.alerts.forEach(alert => {
+              alertsHtml += `<div class="alert-item alert-danger">${alert}</div>`;
+            });
+            alertsContainer.innerHTML = alertsHtml;
+          } else {
+            alertsContainer.innerHTML = '<p>No alerts at the moment</p>';
+          }
+        })
+        .catch(error => console.error('获取告警信息失败:', error));
+    }, 3000);
+  }
+</script>
+{% endblock javascripts %}
