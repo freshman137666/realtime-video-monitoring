@@ -1,20 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
-      path: '/',
+      path: '/home',
       name: 'home',
-      component: () => import('../views/HomeView.vue')  // 将监控视图设置为默认页面
+      component: () => import('../views/HomeView.vue')
     },
     {
       path: '/about',
       name: 'about',
-      // route level code-splitting
-      // this generates a separate chunk (About.[hash].js) for this route
-      // which is lazy-loaded when the route is visited.
       component: () => import('../views/AboutView.vue')
     },
     {
@@ -23,11 +19,24 @@ const router = createRouter({
       component: () => import('../views/MonitorView.vue')
     },
     {
-    path: '/alart',
-    name: 'alart',
-    component: () => import('../views/AlertView.vue')
+      path: '/alart',
+      name: 'alart',
+      component: () => import('../views/AlertView.vue')
     },
+    // 新增登录路由
+    {
+      path: '/',
+      name: 'login',
+      component: () => import('../views/LoginView.vue')
+    }
+    ,
+    // 新增注册路由
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('../views/RegisterView.vue')
+    }
   ]
 })
 
-export default router 
+export default router
