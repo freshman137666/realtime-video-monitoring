@@ -6,7 +6,7 @@ echo ====================================
 cd /d "%~dp0"
 
 :: 启动后端API服务
-start cmd /k "cd backend && python app.py --port 5000"
+start cmd /k "cd backend && python run.py --port 5000"
 
 :: 等待后端API启动
 echo 等待后端API启动...
