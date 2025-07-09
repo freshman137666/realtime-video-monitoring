@@ -29,7 +29,7 @@
 
 ```bash
 # 激活conda环境
-conda activate object_detection
+conda activate #具体环境按照自己的配置来
 
 # 启动后端
 cd backend
