@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import os
+import face_recognition
 
 from app.services.danger_zone import DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD, TARGET_CLASSES
 from app.services.alerts import (
@@ -9,6 +10,7 @@ from app.services.alerts import (
     update_detection_time, get_alerts, reset_alerts
 )
 from app.utils.geometry import point_in_polygon, distance_to_polygon
+from app.services import face_service
 
 # YOLO模型路径
 MODEL_PATH = "yolov8n.pt"
@@ -101,6 +103,9 @@ def process_video(filepath, uploads_dir):
     # 初始化YOLOv8模型
     model = get_model()
     
+    # 为本次视频处理创建一个新的人脸识别缓存
+    face_recognition_cache = {}
+
     # 处理视频帧
     frame_count = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -122,27 +127,27 @@ def process_video(filepath, uploads_dir):
         # 执行目标追踪
         results = model.track(frame, persist=True)
         
-        # 获取处理后的帧
-        res_plotted = results[0].plot()
+        # 获取处理后的帧, 我们不再使用plot()，而是自己绘制
+        processed_frame = frame.copy()
         
         # 绘制危险区域
-        overlay = res_plotted.copy()
+        overlay = processed_frame.copy()
         danger_zone_pts = DANGER_ZONE.reshape((-1, 1, 2))
         cv2.fillPoly(overlay, [danger_zone_pts], (0, 0, 255))
-        cv2.addWeighted(overlay, 0.4, res_plotted, 0.6, 0, res_plotted)
-        cv2.polylines(res_plotted, [danger_zone_pts], True, (0, 0, 255), 3)
+        cv2.addWeighted(overlay, 0.4, processed_frame, 0.6, 0, processed_frame)
+        cv2.polylines(processed_frame, [danger_zone_pts], True, (0, 0, 255), 3)
         
         # 在危险区域中添加文字
         danger_zone_center = np.mean(DANGER_ZONE, axis=0, dtype=np.int32)
-        cv2.putText(res_plotted, "Danger Zone", 
+        cv2.putText(processed_frame, "Danger Zone", 
                     (danger_zone_center[0] - 60, danger_zone_center[1]),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
         
         # 处理检测结果
-        process_detection_results(results, res_plotted, time_diff)
+        process_detection_results(results, processed_frame, time_diff, frame_count, face_recognition_cache)
         
         # 写入处理后的帧到输出视频
-        out.write(res_plotted)
+        out.write(processed_frame)
     
     # 释放资源
     cap.release()
@@ -159,7 +164,7 @@ def process_video(filepath, uploads_dir):
         "alerts": get_alerts()
     }
 
-def process_detection_results(results, frame, time_diff):
+def process_detection_results(results, frame, time_diff, frame_count, face_recognition_cache):
     """
     处理检测结果，更新警报状态并在帧上绘制信息
     
@@ -167,6 +172,8 @@ def process_detection_results(results, frame, time_diff):
         results: YOLO检测结果
         frame: 当前视频帧
         time_diff: 与上一帧的时间差
+        frame_count: 当前的帧数，用于控制人脸识别频率
+        face_recognition_cache: 用于缓存已识别人脸的字典
     """
     # 如果有追踪结果，在画面上显示追踪ID和危险区域告警
     if hasattr(results[0], 'boxes') and hasattr(results[0].boxes, 'id') and results[0].boxes.id is not None:
@@ -183,6 +190,37 @@ def process_detection_results(results, frame, time_diff):
             
             # 只处理指定类别的目标
             if int(cls) in TARGET_CLASSES:
+                # ============== 人脸识别逻辑 (开始) ==============
+                
+                # 首先从缓存中获取名字
+                face_name = face_recognition_cache.get(id)
+
+                # 如果缓存中没有，并且是检查帧，则进行识别
+                if face_name is None and frame_count % 10 == 0:
+                    # 从帧中裁剪出人的区域
+                    person_img = frame[int(y1):int(y2), int(x1):int(x2)]
+                    
+                    if person_img.size > 0:
+                        # 将图像从BGR（OpenCV格式）转换为RGB（face_recognition格式）
+                        rgb_person_img = cv2.cvtColor(person_img, cv2.COLOR_BGR2RGB)
+                        
+                        # 查找人脸编码
+                        face_locations = face_recognition.face_locations(rgb_person_img)
+                        face_encodings = face_recognition.face_encodings(rgb_person_img, face_locations)
+
+                        if face_encodings:
+                            # 假设每个人只有一个面孔
+                            identified_name = face_service.identify_face(face_encodings[0])
+                            face_recognition_cache[id] = identified_name # 将结果存入缓存
+                        else:
+                            # 如果未找到人脸，也进行缓存，避免重复检查
+                            face_recognition_cache[id] = "Unknown"
+                
+                # 再次从缓存获取名字
+                face_name = face_recognition_cache.get(id)
+
+                # ============== 人脸识别逻辑 (结束) ==============
+
                 # 计算目标的底部中心点
                 foot_point = (int((x1 + x2) / 2), int(y2))
                 
@@ -196,6 +234,14 @@ def process_detection_results(results, frame, time_diff):
                 label_color = (0, 255, 0)  # 默认绿色
                 alert_status = None
                 
+                display_name = class_name
+                if face_name and face_name != "Unknown":
+                    display_name = face_name
+                elif face_name == "Unknown":
+                    display_name = "Stranger"
+                    add_alert(f"ID:{id} Detected as a stranger.")
+
+
                 # 如果在危险区域内，更新停留时间
                 if in_danger_zone:
                     loitering_time = update_loitering_time(id, time_diff)
@@ -204,7 +250,7 @@ def process_detection_results(results, frame, time_diff):
                     if loitering_time >= LOITERING_THRESHOLD:
                         # 使用纯红色
                         label_color = (0, 0, 255)  # BGR格式：红色
-                        alert_status = f"ID:{id} ({class_name}) staying in danger zone for {loitering_time:.1f}s"
+                        alert_status = f"ID:{id} ({display_name}) staying in danger zone for {loitering_time:.1f}s"
                         add_alert(alert_status)
                     else:
                         # 根据停留时间从橙色到红色渐变
@@ -222,11 +268,12 @@ def process_detection_results(results, frame, time_diff):
                         # 从黄色(0,255,255)到绿色(0,255,0)渐变
                         label_color = (0, 255, int(255 * (1 - ratio)))
                         
-                        alert_status = f"ID:{id} ({class_name}) too close to danger zone ({distance:.1f}px)"
+                        alert_status = f"ID:{id} ({display_name}) too close to danger zone ({distance:.1f}px)"
                         add_alert(alert_status)
                 
                 # 在每个目标上方显示ID和类别
-                label = f"ID:{id} {class_name}"
+                label = f"ID:{id} {display_name}"
+
                 if in_danger_zone:
                     label += f" time:{get_loitering_time(id):.1f}s"
                 elif distance < SAFETY_DISTANCE:
@@ -265,10 +312,14 @@ def process_detection_results(results, frame, time_diff):
                 
                 # 绘制边框
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), label_color, thickness)
+
+                # 绘制标签背景
+                (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                cv2.rectangle(frame, (int(x1), int(y1) - h - 10), (int(x1) + w, int(y1) - 5), label_color, -1)
                 
-                # 绘制标签
+                # 绘制标签文本
                 cv2.putText(frame, label, (int(x1), int(y1)-10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, label_color, 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 
                 # 在目标底部位置画一个点
                 foot_point = (int((x1 + x2) / 2), int(y2))
