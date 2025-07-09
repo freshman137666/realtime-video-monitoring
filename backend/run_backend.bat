@@ -1,28 +1,12 @@
 @echo off
-echo 启动视频监控后端API服务...
-echo ====================================
-
-:: 切换到当前目录
-cd /d "%~dp0"
-
-:: 解决 "OMP: Error #15" 警告
-echo 设置环境变量以允许多个OpenMP运行时...
-set KMP_DUPLICATE_LIB_OK=TRUE
-
-:: 激活conda环境
-echo 激活conda环境: video_monitor...
-call conda activate video_monitor
-
-:: 检查conda环境是否激活成功
-if %errorlevel% neq 0 (
-    echo 错误: 激活conda环境 'video_monitor' 失败。
-    echo 请确保已正确安装conda并且环境存在。
-    pause
-    exit /b
+echo 正在激活conda环境...
+call conda activate video_monitor || (
+    echo 激活conda环境失败，尝试使用pip安装依赖...
+    pip install -r requirements.txt
 )
 
-:: 启动后端API服务
-echo 启动Flask后端服务...
-python app.py
+echo 正在启动后端服务...
+cd %~dp0
+python run.py --host 0.0.0.0 --port 5000
 
 pause 
