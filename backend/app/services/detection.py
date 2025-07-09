@@ -105,7 +105,7 @@ def process_video(filepath, uploads_dir):
     
     # 为本次视频处理创建一个新的人脸识别缓存
     face_recognition_cache = {}
-
+    
     # 处理视频帧
     frame_count = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -241,7 +241,7 @@ def process_detection_results(results, frame, time_diff, frame_count, face_recog
                     display_name = "Stranger"
                     add_alert(f"ID:{id} Detected as a stranger.")
 
-
+                
                 # 如果在危险区域内，更新停留时间
                 if in_danger_zone:
                     loitering_time = update_loitering_time(id, time_diff)
@@ -312,7 +312,7 @@ def process_detection_results(results, frame, time_diff, frame_count, face_recog
                 
                 # 绘制边框
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), label_color, thickness)
-
+                
                 # 绘制标签背景
                 (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
                 cv2.rectangle(frame, (int(x1), int(y1) - h - 10), (int(x1) + w, int(y1) - 5), label_color, -1)

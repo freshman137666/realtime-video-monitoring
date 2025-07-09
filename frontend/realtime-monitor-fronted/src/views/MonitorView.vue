@@ -230,8 +230,8 @@ const deleteFace = async (name) => {
       loadRegisteredUsers(); // 成功后刷新列表
     } catch (error) {
       // apiFetch中已处理错误
-    }
   }
+}
 };
 
 
