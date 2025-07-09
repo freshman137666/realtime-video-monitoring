@@ -18,9 +18,11 @@ def create_app():
     from app.routes.api import api_bp
     from app.routes.video import video_bp
     from app.routes.config import config_bp
+    from app.routes.face import face_bp
     
     app.register_blueprint(api_bp)
     app.register_blueprint(video_bp)
     app.register_blueprint(config_bp)
+    app.register_blueprint(face_bp)
     
     return app 

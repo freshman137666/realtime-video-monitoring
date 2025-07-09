@@ -91,6 +91,23 @@
             <p v-else>当前无告警信息</p>
           </div>
         </div>
+
+        <!-- 人员管理 -->
+        <div class="control-section">
+          <h3>人员管理 (Face Management)</h3>
+          <div class="button-group">
+            <button @click="registerFace" class="apply-button">添加人员</button>
+          </div>
+          <div class="user-list-container">
+            <ul v-if="registeredUsers.length > 0">
+              <li v-for="user in registeredUsers" :key="user">
+                <span>{{ user }}</span>
+                <button @click="deleteFace(user)" class="delete-button">删除</button>
+              </li>
+            </ul>
+            <p v-else>未注册任何人员</p>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -113,112 +130,154 @@ const safetyDistance = ref(100)
 const loiteringThreshold = ref(2.0)
 const originalDangerZone = ref(null)
 const fileInput = ref(null)
+const faceFileInput = ref(null) // 用于人脸注册的文件输入
+const registeredUsers = ref([]) // 已注册用户列表
 
-// 加载配置
+// --- API 调用封装 ---
+const apiFetch = async (endpoint, options = {}) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(errorData.message || `服务器错误: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error(`API调用失败 ${endpoint}:`, error);
+    alert(`操作失败: ${error.message}`);
+    throw error; // 重新抛出错误以便调用者可以捕获
+  }
+};
+
+
+// --- 配置管理 ---
 const loadConfig = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/config`)
-    const data = await response.json()
-    safetyDistance.value = data.safety_distance
-    loiteringThreshold.value = data.loitering_threshold
-    console.log('Configuration loaded:', data)
+    const data = await apiFetch('/config');
+    safetyDistance.value = data.safety_distance;
+    loiteringThreshold.value = data.loitering_threshold;
+    console.log('Configuration loaded:', data);
   } catch (error) {
-    console.error('Error loading configuration:', error)
+    // apiFetch中已处理错误
   }
-}
+};
 
-// 更新设置
 const updateSettings = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/update_thresholds`, {
+    const data = await apiFetch('/update_thresholds', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         safety_distance: parseInt(safetyDistance.value),
         loitering_threshold: parseFloat(loiteringThreshold.value)
       })
-    })
-    const data = await response.json()
-    alert(data.message)
+    });
+    alert(data.message);
   } catch (error) {
-    console.error('Error updating settings:', error)
-    alert('更新设置失败')
+     // apiFetch中已处理错误
   }
-}
+};
 
-// 连接摄像头流
+// --- 人脸管理 ---
+const loadRegisteredUsers = async () => {
+  try {
+    const data = await apiFetch('/faces/');
+    registeredUsers.value = data.names;
+  } catch (error) {
+    // apiFetch中已处理错误
+  }
+};
+
+const registerFace = () => {
+  const name = prompt("请输入要注册人员的姓名:");
+  if (name) {
+    // 触发隐藏的文件输入框
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/jpg,image/png';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        handleFaceUpload(file, name);
+      }
+    };
+    input.click();
+  }
+};
+
+const handleFaceUpload = async (file, name) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('name', name);
+
+  try {
+    const data = await apiFetch('/faces/register', {
+      method: 'POST',
+      body: formData,
+    });
+    alert(data.message);
+    loadRegisteredUsers(); // 成功后刷新列表
+  } catch (error) {
+    // apiFetch中已处理错误
+  }
+};
+
+const deleteFace = async (name) => {
+  if (confirm(`确定要删除人员 '${name}' 吗?`)) {
+    try {
+      const data = await apiFetch(`/faces/${name}`, { method: 'DELETE' });
+      alert(data.message);
+      loadRegisteredUsers(); // 成功后刷新列表
+    } catch (error) {
+      // apiFetch中已处理错误
+    }
+  }
+};
+
+
+// --- 视频/图像处理 ---
 const connectWebcam = () => {
-  // 关键修复：添加时间戳来防止浏览器缓存
-  videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`
-  activeSource.value = 'webcam'
-  startAlertPolling()
-}
+  // 添加时间戳来防止浏览器缓存
+  videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
+  activeSource.value = 'webcam';
+  startAlertPolling();
+};
 
-// 上传视频文件
 const uploadVideoFile = () => {
-  fileInput.value.click()
-}
+  fileInput.value.click();
+};
 
-// 处理文件上传
 const handleFileUpload = async (event) => {
-  const file = event.target.files[0]
-  if (!file) return
+  const file = event.target.files[0];
+  if (!file) return;
   
   // 显示加载状态
-  videoSource.value = ''
-  activeSource.value = 'loading'
+  videoSource.value = '';
+  activeSource.value = 'loading';
   
-  // 检查文件类型
-  const fileType = file.type
-  if (!fileType.includes('video/mp4') && !fileType.includes('image/jpeg') && !fileType.includes('image/jpg')) {
-    alert('只支持MP4视频或JPG图片文件')
-    activeSource.value = ''
-    return
-  }
-  
-  const formData = new FormData()
-  formData.append('file', file)
+  const formData = new FormData();
+  formData.append('file', file);
   
   try {
-    console.log('开始上传文件:', file.name, '类型:', file.type)
-    const response = await fetch(`${API_BASE_URL}/upload`, {
+    const data = await apiFetch('/upload', {
       method: 'POST',
       body: formData
-    })
+    });
     
-    console.log('上传响应状态:', response.status)
+    // 使用时间戳确保视频/图像被重新加载
+    videoSource.value = `${SERVER_ROOT_URL}${data.file_url}?t=${new Date().getTime()}`;
+    activeSource.value = 'upload';
     
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`服务器返回错误状态 ${response.status}: ${errorText}`)
-    }
-    
-    const data = await response.json()
-    console.log('上传响应数据:', data)
-    
-    if (data.status === 'success') {
-      console.log('文件处理成功，URL:', data.file_url)
-      // 确保URL路径正确，使用服务器根URL拼接
-      videoSource.value = `${SERVER_ROOT_URL}${data.file_url}`
-      activeSource.value = 'upload'
-      alerts.value = data.alerts || []
-      
-      // 如果是视频，需要不断刷新告警
-      if (data.media_type === 'video') {
-        startAlertPolling()
-      }
-    } else {
-      alert(`上传失败: ${data.message || '未知错误'}`)
-      activeSource.value = ''
-    }
+    // 加载返回的告警信息
+    alerts.value = data.alerts || [];
+    stopAlertPolling(); // 处理完成后停止轮询
+
   } catch (error) {
-    console.error('上传文件错误:', error)
-    alert(`上传文件出错: ${error.message}`)
-    activeSource.value = ''
+    // apiFetch中已处理alert，这里重置状态
+    activeSource.value = '';
   }
-}
+};
+
 
 // 危险区域编辑模式
 const toggleEditMode = async () => {
@@ -270,7 +329,6 @@ const toggleEditMode = async () => {
       })
       
       editMode.value = false
-      alert('危险区域已保存')
     } catch (error) {
       console.error('Error saving danger zone:', error)
       alert('保存危险区域失败')
@@ -319,6 +377,13 @@ const isVideoUrl = (url) => {
   return url.toLowerCase().includes('.mp4')
 }
 
+const stopAlertPolling = () => {
+  if (alertPollingInterval) {
+    clearInterval(alertPollingInterval);
+    alertPollingInterval = null;
+  }
+}
+
 // 定期轮询告警信息
 let alertPollingInterval = null
 
@@ -336,13 +401,16 @@ const startAlertPolling = () => {
       alerts.value = data.alerts || []
     } catch (error) {
       console.error('Error fetching alerts:', error)
+      // 如果获取告警失败（例如服务器重启），则停止轮询
+      stopAlertPolling();
     }
-  }, 3000)
+  }, 2000) // 轮询频率调整为2秒
 }
 
 // 生命周期钩子
 onMounted(() => {
   loadConfig()
+  loadRegisteredUsers() // 页面加载时获取已注册用户
 })
 
 onUnmounted(() => {
@@ -352,68 +420,58 @@ onUnmounted(() => {
 })
 </script>
 
-<style>
+<style scoped>
 .monitor-page {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
 }
 
-h1 {
+.monitor-page h1 {
   text-align: center;
-  margin-bottom: 30px;
-  color: #2c3e50;
+  margin-bottom: 2rem;
+  color: #e0e0e0;
 }
-
 .monitor-container {
   display: flex;
-  gap: 20px;
+  gap: 2rem;
   flex-wrap: wrap;
 }
-
-.video-container {
-  flex: 2;
-  min-width: 640px;
-}
-
-.control-panel {
+.video-container, .control-panel {
   flex: 1;
   min-width: 300px;
+  border-radius: 8px;
+  padding: 1.5rem;
 }
-
+.video-container h2, .control-panel h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #444;
+  padding-bottom: 0.5rem;
+}
 .video-wrapper {
   width: 100%;
   height: 480px;
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+  background-color: #000;
+  border: 1px solid #444;
+  border-radius: 4px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-
-.video-wrapper img {
+.video-wrapper img, .video-wrapper video {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
 }
-
-.video-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #999;
-}
-
-.loading-state {
+.video-placeholder, .loading-state {
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
+  align-items: center;
   height: 100%;
-  color: #555;
+  color: #888;
 }
 
 .loading-spinner {
@@ -423,7 +481,7 @@ h1 {
   width: 40px;
   height: 40px;
   animation: spin 1s linear infinite;
-  margin-top: 10px;
+  margin-top: 1rem;
 }
 
 @keyframes spin {
@@ -432,108 +490,116 @@ h1 {
 }
 
 .control-section {
-  margin-bottom: 20px;
-  padding: 15px;
-  background-color: #f9f9f9;
-  border-radius: 5px;
-  border: 1px solid #eee;
+  margin-bottom: 2rem;
 }
-
-h2 {
-  margin-bottom: 15px;
-  color: #2c3e50;
+.control-section h3 {
+  margin-bottom: 1rem;
+  color: #ccc;
 }
-
-h3 {
-  margin-bottom: 10px;
-  color: #2c3e50;
-  font-size: 16px;
-}
-
 .button-group {
   display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 1rem;
+  margin-bottom: 1rem;
 }
-
-button {
-  padding: 8px 12px;
-  background-color: #4CAF50;
-  color: white;
+.button-group button, .apply-button {
+  padding: 0.5rem 1rem;
   border: none;
   border-radius: 4px;
+  background-color: #4CAF50;
+  color: white;
   cursor: pointer;
-  font-size: 14px;
+  transition: background-color 0.3s;
 }
-
-button:hover {
+.button-group button:hover, .apply-button:hover {
   background-color: #45a049;
 }
+.button-group button.active {
+  background-color: #007BFF;
+}
 
-button.active {
-  background-color: #2196F3;
+.edit-instructions {
+  font-size: 0.9rem;
+  color: #aaa;
+  margin-top: 1rem;
 }
 
 .setting-row {
   display: flex;
   align-items: center;
-  margin-bottom: 15px;
-  gap: 10px;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .setting-row label {
-  flex: 1;
+  flex-basis: 120px;
 }
 
-.setting-row input {
-  flex: 2;
-}
-
-.setting-row span {
-  flex: 0 0 40px;
-  text-align: right;
-}
-
-.apply-button {
-  width: 100%;
-  margin-top: 10px;
-}
-
-.alert-section {
-  margin-top: 30px;
+.setting-row input[type="range"] {
+  flex-grow: 1;
 }
 
 .alerts-container {
-  max-height: 200px;
+  height: 150px;
   overflow-y: auto;
-  padding: 10px;
-  background-color: #fff;
-  border: 1px solid #ddd;
+  border: 1px solid #444;
+  padding: 0.5rem;
   border-radius: 4px;
+  background-color: #2a2a2e;
 }
 
-.has-alerts {
+.alerts-container.has-alerts {
   border-color: #f44336;
 }
 
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .alert-item {
-  padding: 8px;
-  margin-bottom: 5px;
+  background-color: #533;
+  padding: 0.5rem;
+  border-radius: 4px;
+  color: #ffcccc;
+}
+
+.user-list-container {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #444;
+  padding: 0.5rem;
+  border-radius: 4px;
+}
+
+.user-list-container ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.user-list-container li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  border-bottom: 1px solid #333;
+}
+
+.user-list-container li:last-child {
+  border-bottom: none;
+}
+
+.delete-button {
+  padding: 0.2rem 0.5rem;
+  background-color: #f44336;
+  color: white;
+  border: none;
   border-radius: 3px;
-  background-color: #ffebee;
-  border-left: 3px solid #f44336;
-  font-size: 14px;
+  cursor: pointer;
 }
 
-.edit-instructions {
-  margin-top: 10px;
-  padding: 8px;
-  background-color: #fff3cd;
-  border-left: 3px solid #ffc107;
-  font-size: 12px;
-}
-
-.edit-instructions p {
-  margin: 5px 0;
+.delete-button:hover {
+  background-color: #d32f2f;
 }
 </style> 
