@@ -195,8 +195,14 @@ def process_detection_results(results, frame, time_diff, frame_count, face_recog
                 # 首先从缓存中获取名字
                 face_name = face_recognition_cache.get(id)
 
-                # 如果缓存中没有，并且是检查帧，则进行识别
-                if face_name is None and frame_count % 10 == 0:
+                # --- 人脸识别触发条件 ---
+                # 1. 缓存中没有该ID (每10帧检查一次新出现的人)
+                # 2. 或 到了周期性复核的时间点 (每100帧强制复核一次所有人，以纠正潜在错误)
+                should_identify = (face_name is None and frame_count % 10 == 0) or \
+                                  (frame_count % 100 == 0)
+
+                # 如果满足任一条件，则执行人脸识别
+                if should_identify:
                     # 从帧中裁剪出人的区域
                     person_img = frame[int(y1):int(y2), int(x1):int(x2)]
                     
@@ -210,13 +216,16 @@ def process_detection_results(results, frame, time_diff, frame_count, face_recog
 
                         if face_encodings:
                             # 假设每个人只有一个面孔
-                            identified_name = face_service.identify_face(face_encodings[0])
-                            face_recognition_cache[id] = identified_name # 将结果存入缓存
+                            identified_name, distance = face_service.identify_face(face_encodings[0])
+                            
+                            # 只有当识别结果可信时 (距离足够小)，才更新缓存
+                            if identified_name != "Unknown":
+                                face_recognition_cache[id] = identified_name # 将高可信度的结果存入或更新缓存
                         else:
                             # 如果未找到人脸，也进行缓存，避免重复检查
                             face_recognition_cache[id] = "Unknown"
                 
-                # 再次从缓存获取名字
+                # 再次从缓存获取名字 (因为可能刚刚更新过)
                 face_name = face_recognition_cache.get(id)
 
                 # ============== 人脸识别逻辑 (结束) ==============
