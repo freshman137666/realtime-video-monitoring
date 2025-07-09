@@ -183,7 +183,7 @@ const goBack = () => {
   if (isCameraActive.value) {
     (videoElement.value?.srcObject as MediaStream)?.getTracks().forEach(track => track.stop());
   }
-  router.push('/');
+  router.push('/home');
 };
 
 // 组件卸载时关闭摄像头
