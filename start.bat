@@ -4,16 +4,16 @@ echo ====================================
 
 :: 启动后端
 echo 正在启动后端服务...
-start cmd /k "cd backend && run_backend.bat"
+start "后端服务" cmd /k "cd backend && run_backend.bat"
 
-:: 等待后端启动
-echo 等待后端启动 (5秒)...
-timeout /t 5 /nobreak > nul
+:: 启动后端API服务
+start "后端API服务" cmd /k "cd backend && python run.py --port 5000"
+
 
 :: 启动前端
 echo 正在启动前端服务...
 cd frontend\realtime-monitor-fronted
-start cmd /k "npm run dev"
+start "前端服务" cmd /k "npm run dev"
 
 echo ====================================
 echo 服务已启动:
