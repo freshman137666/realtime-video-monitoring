@@ -1,5 +1,81 @@
 # 实时视频监控系统
 
+本系统是一个基于YOLOv8和Flask、Vue的全栈实时视频监控应用，旨在提供一个灵活、可扩展的框架，用于集成各种计算机视觉任务，如危险区域入侵检测、人脸识别、异常行为分析等。
+
+## 环境配置指南
+
+为了确保项目顺利运行，请遵循以下步骤配置您的开发环境。推荐使用 [Anaconda](https://www.anaconda.com/products/distribution) 来管理Python环境。
+
+### 1. 克隆项目
+
+```bash
+git clone [你的项目Git仓库地址]
+cd realtime-video-monitoring
+```
+
+### 2. 配置后端环境 (Python)
+
+项目后端依赖于特定的Python包，尤其是`dlib`在Windows上直接使用`pip`安装可能会失败。我们强烈建议使用`conda`来创建和管理环境。
+
+**第一步：创建并激活Conda环境**
+
+打开Anaconda Prompt或您的终端，使用以下命令创建一个名为 `video_monitor` 的Python 3.9环境（如果已有该环境，请直接激活）。
+
+```bash
+conda create -n video_monitor python=3.9 -y
+conda activate video_monitor
+```
+
+**第二步：安装 `dlib` (关键步骤)**
+
+`dlib` 是 `face-recognition` 库的核心依赖，且编译过程复杂。请务必使用`conda`从`conda-forge`渠道安装预编译好的版本，以避免错误。
+
+```bash
+conda install -c conda-forge dlib -y
+```
+
+**第三步：安装其余Python依赖**
+
+当`dlib`安装成功后，再使用`pip`安装`requirements.txt`中剩余的依赖包。
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. 配置前端环境 (Node.js)
+
+项目前端是基于Vue.js和Vite构建的。请确保您已安装 [Node.js](https://nodejs.org/) (推荐LTS版本)。
+
+进入前端项目目录，安装npm依赖。
+
+```bash
+cd frontend/realtime-monitor-fronted
+npm install
+```
+
+### 4. 运行项目
+
+你需要打开两个终端：
+
+*   **终端1 (启动后端)**:
+    ```bash
+    conda activate video_monitor
+    cd backend
+    python run.py
+    ```
+
+*   **终端2 (启动前端)**:
+    ```bash
+    cd frontend/realtime-monitor-fronted
+    npm run dev
+    ```
+
+服务启动后，在浏览器中打开前端地址 (通常是 `http://localhost:5173`) 即可访问系统。
+
+---
+
+## 项目概述
+
 这是一个基于Flask和Vue的前后端分离实时视频监控应用，使用YOLOv8进行对象检测和追踪，能够检测危险区域内的物体并发出警报。
 
 ## 项目结构
