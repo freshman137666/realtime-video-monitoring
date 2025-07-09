@@ -18,11 +18,6 @@ const router = createRouter({
       name: 'monitor',
       component: () => import('../views/MonitorView.vue')
     },
-    {
-      path: '/alart',
-      name: 'alart',
-      component: () => import('../views/AlertView.vue')
-    },
     // 新增登录路由
     {
       path: '/',
@@ -35,7 +30,22 @@ const router = createRouter({
       path: '/register',
       name: 'register',
       component: () => import('../views/RegisterView.vue')
-    }
+    },
+    {
+      path: '/alert',
+      name: 'alert',
+      component: () => import('../views/AlertView.vue')
+    },
+    {
+    path: '/face',
+    name: 'face',
+    component: () => import('../views/FaceRecognition.vue')
+    },
+    {
+    path: '/device',
+    name: 'device',
+    component: () => import('../views/DeviceView.vue')
+    },
   ]
 })
 

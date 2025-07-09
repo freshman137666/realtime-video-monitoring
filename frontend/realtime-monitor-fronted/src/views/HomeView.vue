@@ -7,8 +7,10 @@
         <div class="control-section">
           <h3>操作选项</h3>
           <div class="button-group">
+            <button @click="goToFaceRecognitionPage" :class="{ active: false }">入站人脸</button>
             <button @click="goToMonitorPage" :class="{ active: false }">监控大屏</button>
             <button @click="goToAlertPage" :class="{ active: false }">警报处置</button>
+            <button @click="goToDevicePage" :class="{ active: false }">设备信息</button>
           </div>
         </div>
       </div>
@@ -54,9 +56,17 @@ const goToAlertPage = () => {
   router.push('/alert')
 }
 
+const goToFaceRecognitionPage = () => {
+  router.push('/face');
+};
+
 const goToAboutPage = () => {
   router.push('/about')
 }
+
+const goToDevicePage = () => {
+  router.push('/device');
+};
 
 const logout = () => {
   // 清除本地存储的登录状态
@@ -122,6 +132,10 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.button-group.vertical {
+  flex-direction: column;
 }
 
 button {

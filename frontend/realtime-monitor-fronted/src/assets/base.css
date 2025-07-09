@@ -42,6 +42,7 @@
   :root {
     --color-background: var(--vt-c-green-light);
     --color-background-soft: var(--vt-c-green-dark);
+
     --color-background-mute: var(--vt-c-black-mute);
 
     --color-border: var(--vt-c-divider-dark-2);
