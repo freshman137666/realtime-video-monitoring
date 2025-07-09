@@ -33,7 +33,7 @@ def video_feed():
             ret, frame = cap.read()
             if not ret:
                 break
-            
+                
             frame_count += 1
             
             # 计算帧之间的时间差以进行徘徊检测

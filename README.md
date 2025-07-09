@@ -40,6 +40,7 @@ conda activate video_monitor
 `dlib` 是 `face-recognition` 库的核心依赖，且编译过程复杂。请务必使用`conda`从`conda-forge`渠道安装预编译好的版本，以避免错误。
 
 ```bash
+conda install -c https://conda.anaconda.org/conda-forge dlib
 conda install -c conda-forge dlib -y
 ```
 
