@@ -1,6 +1,17 @@
 # 实时视频监控系统
 
-本系统是一个基于YOLOv8和Flask、Vue的全栈实时视频监控应用，旨在提供一个灵活、可扩展的框架，用于集成各种计算机视觉任务，如危险区域入侵检测、人脸识别、异常行为分析等。
+本系统是一个基于YOLOv8、Flask和Vue的全栈实时视频监控应用，旨在提供一个灵活、可扩展的框架，用于集成各种计算机视觉任务，如危险区域入侵检测、人脸识别、异常行为分析等。
+
+## 目录
+- [环境配置指南](#环境配置指南)
+- [项目启动](#项目启动)
+- [功能特性](#功能特性)
+- [技术栈](#技术栈)
+- [项目结构](#项目结构)
+- [API端点（简要）](#api端点简要)
+- [常见问题](#常见问题)
+
+---
 
 ## 环境配置指南
 
@@ -18,8 +29,7 @@ cd realtime-video-monitoring
 项目后端依赖于特定的Python包，尤其是`dlib`在Windows上直接使用`pip`安装可能会失败。我们强烈建议使用`conda`来创建和管理环境。
 
 **第一步：创建并激活Conda环境**
-
-打开Anaconda Prompt或您的终端，使用以下命令创建一个名为 `video_monitor` 的Python 3.9环境（如果已有该环境，请直接激活）。
+打开Anaconda Prompt或您的终端，使用以下命令创建一个名为 `video_monitor` 的Python 3.9环境。
 
 ```bash
 conda create -n video_monitor python=3.9 -y
@@ -27,7 +37,6 @@ conda activate video_monitor
 ```
 
 **第二步：安装 `dlib` (关键步骤)**
-
 `dlib` 是 `face-recognition` 库的核心依赖，且编译过程复杂。请务必使用`conda`从`conda-forge`渠道安装预编译好的版本，以避免错误。
 
 ```bash
@@ -35,7 +44,6 @@ conda install -c conda-forge dlib -y
 ```
 
 **第三步：安装其余Python依赖**
-
 当`dlib`安装成功后，再使用`pip`安装`requirements.txt`中剩余的依赖包。
 
 ```bash
@@ -53,222 +61,117 @@ cd frontend/realtime-monitor-fronted
 npm install
 ```
 
-### 4. 运行项目
+---
 
-你需要打开两个终端：
+## 项目启动
 
-*   **终端1 (启动后端)**:
-    ```bash
-    conda activate video_monitor
-    cd backend
-    python run.py
-    ```
+你需要打开两个终端来分别启动后端和前端服务。
 
-*   **终端2 (启动前端)**:
-    ```bash
-    cd frontend/realtime-monitor-fronted
-    npm run dev
-    ```
+#### 启动后端
 
+```bash
+conda activate video_monitor
+cd backend
+python run.py
+```
+后端服务将运行在 `http://localhost:5000`。
+
+#### 启动前端
+
+```bash
+cd frontend/realtime-monitor-fronted
+npm run dev
+```
 服务启动后，在浏览器中打开前端地址 (通常是 `http://localhost:5173`) 即可访问系统。
 
 ---
 
-## 项目概述
-
-这是一个基于Flask和Vue的前后端分离实时视频监控应用，使用YOLOv8进行对象检测和追踪，能够检测危险区域内的物体并发出警报。
-
-## 项目结构
-
-```
-realtime-video-monitoring/
-│
-├── backend/                       # Flask后端API
-│   ├── app/                       # 应用模块
-│   │   ├── routes/                # API路由
-│   │   │   ├── api.py             # 基础API端点
-│   │   │   ├── config.py          # 配置相关API
-│   │   │   └── video.py           # 视频处理API
-│   │   ├── services/              # 业务逻辑
-│   │   │   ├── alerts.py          # 警报管理
-│   │   │   ├── danger_zone.py     # 危险区域配置
-│   │   │   ├── detection.py       # 对象检测
-│   │   │   └── video.py           # 视频流处理
-│   │   └── utils/                 # 工具函数
-│   │       └── geometry.py        # 几何计算
-│   ├── uploads/                   # 上传文件目录
-│   ├── run.py                     # 应用入口
-│   └── run_backend.bat            # 后端启动脚本
-│
-├── frontend/                      # Vue前端应用
-│   └── realtime-monitor-fronted/
-│       ├── src/                   # 源代码
-│       │   ├── assets/            # 静态资源
-│       │   ├── components/        # 组件
-│       │   ├── router/            # 路由配置
-│       │   ├── stores/            # 状态管理
-│       │   ├── views/             # 页面视图
-│       │   ├── App.vue            # 根组件
-│       │   └── main.js            # 入口文件
-│       ├── public/                # 公共资源
-│       └── index.html             # HTML模板
-│
-├── danger_zone_config.json        # 危险区域配置文件
-├── start.bat                      # 一键启动脚本
-├── requirements.txt               # Python依赖列表
-└── README.md                      # 项目说明文档
-```
-
 ## 功能特性
 
-- 实时视频监控与对象检测
-- 目标追踪与唯一ID分配
-- 危险区域定义与可视化
-- 危险区域入侵检测与告警
-- 可自定义安全距离和停留时间阈值
-- 支持上传视频或图片进行离线分析
+- **实时视频处理**: 支持通过本地摄像头或上传视频文件进行分析。
+- **通用目标检测**: 基于YOLOv8，可识别多种常见物体。
+- **自定义危险区域**: 用户可通过前端交互界面，动态设置和调整多边形危险区域。
+- **智能告警系统**:
+    - **入侵告警**: 当人员进入危险区域时触发。
+    - **接近告警**: 当人员与危险区域边缘小于设定的安全距离时触发。
+    - **徘徊告警**: 当人员在危险区域内停留时间超过设定的阈值时触发。
+- **人脸识别与管理**:
+    - 支持注册、删除人脸信息。
+    - 在视频中识别已注册人员，并标记陌生人。
+    - 陌生人闯入时自动生成告警。
+- **动态参数配置**: 安全距离、停留阈值等核心参数均可在前端动态调整。
+
+---
 
 ## 技术栈
 
-### 前端
-- Vue 3
-- Vue Router
-- Pinia (状态管理)
-- Vite
+| 类别       | 技术                               |
+| :--------- | :--------------------------------- |
+| **前端**   | Vue 3, Vite, Pinia, Vue Router     |
+| **后端**   | Flask, Flask-CORS                  |
+| **AI/CV**  | YOLOv8 (Ultralytics), OpenCV, `face_recognition`, NumPy |
+| **数据库** | JSON (用于人脸特征和配置存储)      |
 
-### 后端
-- Flask
-- Flask-CORS
-- OpenCV
-- YOLOv8 (Ultralytics)
-- NumPy
+---
 
-## 安装与使用
-
-### 前提条件
-
-- Python 3.8+
-- Node.js 14+
-- npm 6+
-
-### 环境配置
-
-1. **创建并激活Conda环境**
-
-   ```bash
-   conda create -n video_monitor python=3.8
-   conda activate video_monitor
-   ```
-
-2. **安装后端依赖**
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-   或手动安装核心依赖：
-
-   ```bash
-   pip install flask flask-cors opencv-python ultralytics numpy
-   ```
-
-3. **安装前端依赖**
-
-   ```bash
-   cd frontend/realtime-monitor-fronted
-   npm install
-   ```
-
-### 启动应用
-
-#### 方法一：一键启动（推荐）
-
-在Windows上，直接运行根目录下的`start.bat`脚本：
-
-```bash
-start.bat
+## 项目结构
+```
+realtime-video-monitoring/
+│
+├── backend/                # Flask后端
+│   ├── app/                # 应用核心模块
+│   │   ├── routes/         # API路由
+│   │   ├── services/       # 业务逻辑服务
+│   │   └── utils/          # 工具函数
+│   ├── run.py              # 应用入口
+│   └── ...
+│
+├── frontend/               # Vue前端
+│   └── realtime-monitor-fronted/
+│       ├── src/            # 源代码
+│       │   ├── views/      # 页面视图 (如MonitorView.vue)
+│       │   ├── components/ # 可复用组件
+│       │   └── ...
+│       └── ...
+│
+├── data/                   # 数据存储目录
+│   └── face_encodings.json # 持久化的人脸特征数据
+│
+├── danger_zone_config.json # 危险区域配置文件
+├── requirements.txt        # Python依赖
+└── README.md               # 本文档
 ```
 
-这将同时启动前端和后端服务。
+---
 
-#### 方法二：分别启动
+## API端点（简要）
 
-1. **启动后端**
+- `GET /api/status`: 检查后端服务状态。
+- `POST /api/upload`: 上传视频/图片进行分析。
+- `GET /api/video_feed`: 获取实时摄像头处理流。
+- `GET /api/config`: 获取危险区域和阈值配置。
+- `POST /api/update_danger_zone`: 更新危险区域。
+- `POST /api/update_thresholds`: 更新告警阈值。
+- `GET /api/faces`: 获取已注册人脸列表。
+- `POST /api/faces/register`: 注册新人脸。
+- `DELETE /api/faces/<name>`: 删除人脸。
 
-   ```bash
-   # 方式1：使用启动脚本
-   cd backend
-   run_backend.bat
-   
-   # 方式2：直接使用Python
-   cd backend
-   python run.py
-   
-   # 方式3：使用Flask命令（开发模式）
-   cd backend
-   set FLASK_APP=app
-   set FLASK_ENV=development
-   flask run --host=0.0.0.0 --port=5000
-   ```
+---
 
-2. **启动前端**
+## 常见问题
 
-   ```bash
-   cd frontend/realtime-monitor-fronted
-   npm run dev
-   ```
+1. **摄像头无法打开?**
+   - 确保摄像头驱动正常，且没有被其他程序（如腾讯会议、钉钉）占用。
+   - 检查浏览器是否已授予网页摄像头访问权限。
 
-### 访问应用
+2. **人脸识别不准确?**
+   - 确保用于注册的照片是清晰、无遮挡的正面照。
+   - 识别时的光线、角度和面部遮挡（如戴口罩）会影响识别成功率。
 
-- 前端UI: http://localhost:5173
-- 后端API状态: http://localhost:5000/api/status
-- 视频流地址: http://localhost:5000/api/video_feed
+3. **依赖安装失败?**
+   - **后端**: 严格遵循环境配置指南，特别是使用`conda`安装`dlib`的步骤。
+   - **前端**: 如果`npm install`失败，尝试删除`node_modules`文件夹和`package-lock.json`文件后，再重新运行`npm install`。
 
-## 使用说明
-
-1. **视频源选择**
-   - 点击"摄像头"按钮使用实时摄像头
-   - 点击"上传视频"按钮上传本地视频或图片文件
-
-2. **危险区域设置**
-   - 点击"编辑区域"按钮进入编辑模式
-   - 点击并拖动区域点以调整位置
-   - 右键点击删除点
-   - 双击添加新点
-   - 点击"保存区域"保存设置
-
-3. **参数调整**
-   - 使用滑块调整"安全距离"（像素）
-   - 使用滑块调整"警报阈值"（秒）
-   - 点击"应用设置"保存参数
-
-4. **告警信息**
-   - 查看底部告警信息区域获取实时告警
-
-## 告警机制
-
-系统提供两种告警机制：
-
-1. **停留告警**：当目标在危险区域内停留超过设定的阈值时间时触发
-2. **接近告警**：当目标距离危险区域小于安全距离时触发
-
-## 常见问题排查
-
-1. **摄像头无法打开**
-   - 检查摄像头设备是否正常连接
-   - 确认没有其他应用程序占用摄像头
-
-2. **模型加载失败**
-   - 确认`yolov8n.pt`文件存在于项目根目录和backend目录下
-
-3. **前端无法连接后端**
-   - 确认后端服务正常运行（http://localhost:5000/api/status）
-   - 检查浏览器控制台是否有CORS错误
-
-4. **视频处理性能问题**
-   - 考虑使用更小的YOLOv8模型（如yolov8n.pt）
-   - 降低视频分辨率或帧率
-
-## 许可证
-
-本项目采用MIT许可证
+4. **性能问题?**
+   - 人脸识别和目标检测是计算密集型任务。在配置较低的机器上，实时处理的帧率可能会下降。
+   - 考虑在后续开发中增加一个“性能模式”，例如通过降低检测频率或分辨率来提升流畅度。
