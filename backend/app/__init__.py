@@ -1,28 +1,26 @@
 from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
 from flask_cors import CORS
-from .config import Config
-
-# 初始化扩展
-db = SQLAlchemy()
-migrate = Migrate()
+import os
 
 def create_app():
-    """创建并配置Flask应用实例"""
+    # 解决 "OMP: Error #15" 警告
+    os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+    
     app = Flask(__name__)
-    app.config.from_object(Config)
-
-    # 启用CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
-
-    # 初始化数据库和迁移工具
-    db.init_app(app)
-    migrate.init_app(app, db)
-
-    # 注册API蓝图
-    # Flask-RESTX的Api对象会自动处理URL前缀，所以这里不需要指定
-    from .api import api_bp
+    CORS(app)  # 启用跨域支持
+    
+    # 定义上传目录路径
+    UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads')
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    print(f"上传目录: {UPLOADS_DIR}")
+    
+    # 注册蓝图
+    from app.routes.api import api_bp
+    from app.routes.video import video_bp
+    from app.routes.config import config_bp
+    
     app.register_blueprint(api_bp)
-
+    app.register_blueprint(video_bp)
+    app.register_blueprint(config_bp)
+    
     return app 
