@@ -7,8 +7,10 @@
         <div class="control-section">
           <h3>操作选项</h3>
           <div class="button-group">
+            <button @click="goToFaceRecognitionPage" :class="{ active: false }">入站人脸</button>
             <button @click="goToMonitorPage" :class="{ active: false }">监控大屏</button>
             <button @click="goToAlertPage" :class="{ active: false }">警报处置</button>
+            <button @click="goToDevicePage" :class="{ active: false }">设备信息</button>
           </div>
         </div>
       </div>
@@ -17,11 +19,9 @@
         <div class="control-section">
           <h3>个人信息</h3>
           <div class="profile-info">
-            <!-- 头像 -->
             <div class="avatar">
-              <img src="https://via.placeholder.com/100" alt="Avatar">
+              <img src="https://via.placeholder.com/100" alt="用户头像">
             </div>
-            <!-- 昵称和角色 -->
             <div class="name-role">
               <h2>{{ nickname }}</h2>
               <p>{{ role }}</p>
@@ -31,8 +31,8 @@
         <div class="control-section">
           <h3>菜单</h3>
           <div class="button-group">
-            <button @click="goToAboutPage">关于</button>
-            <button @click="logout">退出登录</button>
+            <button @click="goToAboutPage">关于系统</button>
+            <button @click="logout" class="logout-btn">退出登录</button>
           </div>
         </div>
       </div>
@@ -41,29 +41,41 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 
-const router = useRouter();
-const role = ref('管理员');
-const nickname = ref('张三');
+const router = useRouter()
+const role = ref('管理员')
+const nickname = ref('张三')
 
 const goToMonitorPage = () => {
-  router.push('/monitor');
-};
+  router.push('/monitor')
+}
 
 const goToAlertPage = () => {
-  router.push('/alert');
+  router.push('/alert')
+}
+
+const goToFaceRecognitionPage = () => {
+  router.push('/face');
 };
 
 const goToAboutPage = () => {
-  router.push('/about');
+  router.push('/about')
+}
+
+const goToDevicePage = () => {
+  router.push('/device');
 };
 
 const logout = () => {
-  localStorage.removeItem('role');
-  router.push('/login');
-};
+  // 清除本地存储的登录状态
+  localStorage.removeItem('authToken')
+  localStorage.removeItem('userInfo')
+  
+  // 跳转到登录页并替换历史记录
+  router.replace('/')
+}
 </script>
 
 <style scoped>
@@ -71,62 +83,77 @@ const logout = () => {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
+  min-height: 100vh;
+  background-color: var(--color-background);
 }
 
 h1 {
   text-align: center;
   margin-bottom: 30px;
-  color: #2c3e50;
+  color: var(--color-heading);
+  font-size: 28px;
 }
 
 .monitor-container {
   display: flex;
   gap: 20px;
-  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .button-container {
   flex: 2;
   min-width: 640px;
+  max-width: 800px;
 }
 
 .control-panel {
   flex: 1;
   min-width: 300px;
+  max-width: 350px;
 }
 
 .control-section {
   margin-bottom: 20px;
-  padding: 15px;
-  background-color: #f9f9f9;
-  border-radius: 5px;
-  border: 1px solid #eee;
+  padding: 20px;
+  background-color: var(--color-background-soft);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 h3 {
-  margin-bottom: 10px;
-  color: #2c3e50;
-  font-size: 16px;
+  margin-bottom: 15px;
+  color: var(--color-heading);
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .button-group {
   display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.button-group.vertical {
+  flex-direction: column;
 }
 
 button {
-  padding: 8px 12px;
-  background-color: #4CAF50;
+  padding: 12px 16px;
+  background-color: var(--vt-c-indigo);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  text-align: center;
 }
 
 button:hover {
-  background-color: #45a049;
+  background-color: #1a2a3a;
+  transform: translateY(-2px);
 }
 
 button.active {
@@ -136,16 +163,15 @@ button.active {
 .profile-info {
   display: flex;
   align-items: center;
-  margin-bottom: 10px;
+  gap: 20px;
 }
 
 .avatar {
-  width: 100px;
-  height: 100px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
   overflow: hidden;
-  margin-right: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border: 3px solid var(--color-border);
 }
 
 .avatar img {
@@ -157,26 +183,33 @@ button.active {
 .name-role h2 {
   margin: 0;
   font-size: 20px;
+  color: var(--color-heading);
 }
 
 .name-role p {
   margin: 5px 0 0;
-  color: #777;
+  color: var(--color-text);
+  font-size: 14px;
 }
 
-.control-panel ul {
-  list-style-type: none;
-  padding: 0;
-  margin: 0;
+.logout-btn {
+  background-color: #f44336 !important;
+  margin-top: 10px;
 }
 
-.control-panel li {
-  padding: 8px 0;
-  cursor: pointer;
-  transition: color 0.3s ease;
+.logout-btn:hover {
+  background-color: #d32f2f !important;
 }
 
-.control-panel li:hover {
-  color: #2196F3;
+@media (max-width: 1024px) {
+  .monitor-container {
+    flex-direction: column;
+  }
+  
+  .button-container,
+  .control-panel {
+    min-width: 100%;
+    max-width: 100%;
+  }
 }
 </style>
