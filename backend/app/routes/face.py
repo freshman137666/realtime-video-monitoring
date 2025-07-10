@@ -15,13 +15,63 @@ os.makedirs(TEMP_UPLOADS_DIR, exist_ok=True)
 
 @face_bp.route('/', methods=['GET'])
 def get_registered_faces():
-    """获取所有已注册人脸姓名的列表"""
+    """获取所有已注册人脸姓名的列表
+    ---
+    tags:
+      - 人脸管理
+    responses:
+      200:
+        description: 成功返回已注册的人脸姓名列表.
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: success
+            names:
+              type: array
+              items:
+                type: string
+              description: 姓名列表.
+              example: ["person1", "person2"]
+    """
     names = face_service.get_all_registered_names()
     return jsonify({"status": "success", "names": names})
 
 @face_bp.route('/register', methods=['POST'])
 def register_face():
-    """从上传的图像中注册新的人脸"""
+    """从上传的图像中注册新的人脸
+    ---
+    tags:
+      - 人脸管理
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: file
+        in: formData
+        type: file
+        required: true
+        description: 包含人脸的图像文件.
+      - name: name
+        in: formData
+        type: string
+        required: true
+        description: 要注册的姓名.
+    responses:
+      200:
+        description: 人脸注册成功.
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: success
+            message:
+              type: string
+              example: "Face for 'John Doe' registered successfully."
+      400:
+        description: 请求错误，例如未提供文件或姓名.
+    """
     if 'file' not in request.files:
         return jsonify({"status": "error", "message": "未提供图像文件。"}), 400
     
@@ -54,7 +104,22 @@ def register_face():
 
 @face_bp.route('/<name>', methods=['DELETE'])
 def delete_registered_face(name):
-    """按姓名删除已注册的人脸"""
+    """按姓名删除已注册的人脸
+    ---
+    tags:
+      - 人脸管理
+    parameters:
+      - name: name
+        in: path
+        type: string
+        required: true
+        description: 要删除的已注册姓名.
+    responses:
+      200:
+        description: 删除成功.
+      404:
+        description: 未找到指定姓名的人脸.
+    """
     success = face_service.delete_face(name)
     if success:
         return jsonify({"status": "success", "message": f"'{name}' 已被删除。"})
