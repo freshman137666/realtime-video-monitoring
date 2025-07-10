@@ -40,10 +40,6 @@
                     <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
                 </template>
 
-                <!-- Case 3: Loading -->
-              <div class="control-section">
-                  type="file" 
-                  ref="fileInput"
           <!-- Case 3: Loading -->
           <div v-else-if="activeSource === 'loading'" class="loading-state">
             <p>正在处理文件，请稍候...</p>
