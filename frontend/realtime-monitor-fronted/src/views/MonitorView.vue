@@ -159,10 +159,6 @@ import { ref, onMounted, onUnmounted } from 'vue'
 // 导入侧边栏组件
 import Sidebar from '../components/Sidebar.vue'
 
-// 获取当前路由路径
-const route = useRoute()
-const currentPath = route.path
-
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
 const API_BASE_URL = `${SERVER_ROOT_URL}/api`
@@ -175,7 +171,7 @@ const editMode = ref(false)
 const alerts = ref([])
 const safetyDistance = ref(100)
 const loiteringThreshold = ref(2.0)
-const detectionMode = ref('object_detection') // 检测模式状态
+const detectionMode = ref('object_detection') // 新增：检测模式状态
 const originalDangerZone = ref(null)
 // const fileInput = ref(null) // No longer needed
 const faceFileInput = ref(null) // 用于人脸注册的文件输入
@@ -282,6 +278,19 @@ const registerFace = () => {
   }
 };
 
+const disconnectWebcam = async () => {
+  try {
+    await apiFetch('/stop_video_feed', { method: 'POST' });
+    videoSource.value = '';
+    activeSource.value = '';
+    stopAlertPolling(); // 停止轮询告警信息
+    console.log('Webcam disconnected.');
+  } catch (error) {
+    console.error('Failed to disconnect webcam:', error);
+    alert('关闭摄像头失败。');
+  }
+};
+
 const handleFaceUpload = async (file, name) => {
   const formData = new FormData();
   formData.append('file', file);
@@ -307,8 +316,8 @@ const deleteFace = async (name) => {
       loadRegisteredUsers(); // 成功后刷新列表
     } catch (error) {
       // apiFetch中已处理错误
-    }
   }
+}
 };
 
 
@@ -319,19 +328,6 @@ const connectWebcam = () => {
   videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
   activeSource.value = 'webcam';
   startAlertPolling();
-};
-
-const disconnectWebcam = async () => {
-  try {
-    await apiFetch('/stop_video_feed', { method: 'POST' });
-    videoSource.value = '';
-    activeSource.value = '';
-    stopAlertPolling(); // 停止轮询告警信息
-    console.log('Webcam disconnected.');
-  } catch (error) {
-    console.error('Failed to disconnect webcam:', error);
-    alert('关闭摄像头失败。');
-  }
 };
 
 const uploadVideoFile = () => {
@@ -479,7 +475,7 @@ const toggleEditMode = async () => {
       editMode.value = false
     } catch (error) {
       console.error('Error saving danger zone:', error)
-      alert('无法进入编辑模式')
+      alert('保存危险区域失败')
     }
   }
 }
@@ -525,6 +521,13 @@ const isVideoUrl = (url) => {
   return url.toLowerCase().includes('.mp4')
 }
 
+const stopAlertPolling = () => {
+  if (alertPollingInterval) {
+    clearInterval(alertPollingInterval);
+    alertPollingInterval = null;
+  }
+}
+
 // 定期轮询告警信息
 let alertPollingInterval = null
 
@@ -542,23 +545,17 @@ const startAlertPolling = () => {
       alerts.value = data.alerts || []
     } catch (error) {
       console.error('Error fetching alerts:', error)
-      // 如果获取告警失败（例如服务器重启），则停止轮询      stopAlertPolling();
+      // 如果获取告警失败（例如服务器重启），则停止轮询
+      stopAlertPolling();
     }
-  }, 2000) // 轮询频率为2秒
-}
-
-const stopAlertPolling = () => {
-  if (alertPollingInterval) {
-    clearInterval(alertPollingInterval);
-    alertPollingInterval = null;
-  }
+  }, 2000) // 轮询频率调整为2秒
 }
 
 // 生命周期钩子
 onMounted(() => {
   loadConfig()
   loadRegisteredUsers() // 页面加载时获取已注册用户
-  loadDetectionMode() // 页面加载时获取当前检测模式
+  loadDetectionMode() // 新增：页面加载时获取当前检测模式
 })
 
 onUnmounted(() => {
