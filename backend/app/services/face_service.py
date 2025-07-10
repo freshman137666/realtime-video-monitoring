@@ -105,20 +105,26 @@ def identify_face(unknown_encoding):
     参数:
         unknown_encoding: 要识别的人脸编码。
     返回:
-        str: 匹配到的人员姓名或“Unknown”。
+        tuple: 包含(name, distance)的元组，其中name是匹配到的人员姓名或"Unknown"，
+              distance是人脸相似度距离（较小值表示更相似）。
     """
-    if not known_face_names:
-        return "Unknown"
+    if not known_face_encodings:
+        return "Unknown", 1.0
 
-    matches = face_recognition.compare_faces(known_face_encodings, unknown_encoding)
-    name = "Unknown"
-
-    # 使用第一个匹配项。
-    if True in matches:
-        first_match_index = matches.index(True)
-        name = known_face_names[first_match_index]
+    # 计算人脸距离
+    face_distances = face_recognition.face_distance(known_face_encodings, unknown_encoding)
+    
+    # 获取最小距离及其索引
+    if len(face_distances) > 0:
+        best_match_index = np.argmin(face_distances)
+        min_distance = face_distances[best_match_index]
         
-    return name
+        # 设置阈值，低于此值视为匹配成功
+        if min_distance < 0.6:  # 可根据需要调整阈值
+            name = known_face_names[best_match_index]
+            return name, float(min_distance)
+    
+    return "Unknown", 1.0
 
 def get_all_registered_names():
     """返回所有已注册姓名的列表"""
