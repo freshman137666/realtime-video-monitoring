@@ -182,11 +182,34 @@ def toggle_edit_mode():
 
 @config_bp.route("/detection_mode", methods=["GET", "POST"])
 def detection_mode():
-    """获取或设置检测模式"""
+    """获取或设置检测模式
+    ---
+    tags:
+        - 配置管理
+    description: >
+        GET: 获取当前的检测模式.
+        POST: 设置新的检测模式。
+    parameters:
+      - name: body
+        in: body
+        required: false
+        schema:
+            type: object
+            properties:
+                mode:
+                    type: string
+                    enum: ['object_detection', 'face_only', 'smoking_detection']
+                    description: 要设置的新模式。
+    responses:
+        200:
+            description: 成功获取或设置模式。
+        400:
+            description: 无效的模式值。
+    """
     if request.method == "POST":
         data = request.json
         mode = data.get('mode')
-        if mode in ['object_detection', 'face_only']:
+        if mode in ['object_detection', 'face_only', 'smoking_detection']:
             system_state.DETECTION_MODE = mode
             print(f"检测模式已切换为: {system_state.DETECTION_MODE}")
             return jsonify({"status": "success", "message": f"Detection mode set to {mode}"})
