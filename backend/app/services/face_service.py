@@ -147,7 +147,7 @@ def delete_face(name):
     
     known_face_encodings = new_encodings
     known_face_names = new_names
-    
+    sync_face_features_to_db()
     save_known_faces()
     return True
 
@@ -189,19 +189,17 @@ def sync_face_features_to_db():
                 
                 insert_sql = """
                 INSERT INTO passengers (
-                    passenger_id, name, password, 
+                    passenger_id, name,  
                     registered_face_feature, registration_time, 
                     blacklist_flag, last_updated
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 """
                 
-                # 默认值设置
-                default_password = "default_password"  # 实际应用中应使用加密密码
+
                 
                 cursor.execute(insert_sql, (
                     passenger_id,
                     name,
-                    default_password,
                     json.dumps(encoding.tolist()),
                     datetime.now(),
                     False,  # blacklist_flag默认False
