@@ -1,5 +1,6 @@
 from flask import Flask
 from flask_cors import CORS
+from flasgger import Swagger
 import os
 
 def create_app():
@@ -8,6 +9,7 @@ def create_app():
     
     app = Flask(__name__)
     CORS(app)  # 启用跨域支持
+    swagger = Swagger(app) # 初始化 Flasgger
     
     # 定义上传目录路径
     UPLOADS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads')
@@ -18,9 +20,11 @@ def create_app():
     from app.routes.api import api_bp
     from app.routes.video import video_bp
     from app.routes.config import config_bp
+    from app.routes.face import face_bp
     
     app.register_blueprint(api_bp)
     app.register_blueprint(video_bp)
     app.register_blueprint(config_bp)
+    app.register_blueprint(face_bp)
     
     return app 
