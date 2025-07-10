@@ -1,5 +1,7 @@
 <template>
-  <div class="auth-container">
+  <!-- 动态背景容器 -->
+  <div ref="login" class="login-container">
+    <!-- 原有登录卡片内容 -->
     <div class="auth-card">
       <h1>登录</h1>
       <form @submit.prevent="handleLogin">
@@ -18,14 +20,15 @@
           />
         </div>
 
-        <!-- 拼图验证码 -->
-        <div class="captcha-group">
+        <!-- 拼图验证码（调整容器结构实现对齐） -->
+        <div class="form-group captcha-group"> <!-- 复用form-group的宽度样式 -->
           <label>请拖动拼图完成验证</label>
-          <button type="button" @click="onShow">开始验证</button>
+          <button type="button" @click="onShow" class="captcha-btn">开始验证</button>
           <Vcode :show="isShow" @success="onSuccess" @close="onClose" />
         </div>
 
-        <button type="submit" :disabled="!isVerified">登录</button>
+        <!-- 登录按钮 -->
+        <button type="submit" :disabled="!isVerified" class="login-btn">登录</button>
       </form>
 
       <div class="auth-footer">
@@ -37,90 +40,171 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+// 脚本部分保持不变
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Vcode from "vue3-puzzle-vcode"
+import * as THREE from "three"
+import WAVES from "vanta/dist/vanta.waves.min"
 
 const email = ref('admin@qq.com')
 const password = ref('')
 const router = useRouter()
 const isShow = ref(false)
-const isVerified = ref(false) // 验证状态标志位
+const isVerified = ref(false)
 
-// 显示验证码
-const onShow = () => {
-  isShow.value = true
-}
+const onShow = () => { isShow.value = true }
+const onClose = () => { isShow.value = false }
+const onSuccess = () => { isVerified.value = true; onClose() }
 
-// 关闭验证码
-const onClose = () => {
-  isShow.value = false
-}
-
-// 验证成功回调
-const onSuccess = () => {
-  isVerified.value = true // 标记验证成功
-  onClose() // 关闭验证模态框
-}
-
-// 登录处理逻辑
 const handleLogin = () => {
   if (!isVerified.value) {
-    alert('请先完成拼图验证！') // 提示用户完成验证
+    alert('请先完成拼图验证！')
     return
   }
-
   console.log('登录信息:', { email: email.value, password: password.value })
   router.push('/home')
 }
+
+const login = ref(null)
+let vantaEffect = null
+
+onMounted(() => {
+  vantaEffect = WAVES({
+    el: login.value,
+    THREE: THREE,
+    mouseControls: true,
+    touchControls: true,
+    gyroControls: false,
+    minHeight: 200.00,
+    minWidth: 200.00,
+    scale: 1.00,
+    scaleMobile: 1.00,
+    color: 0x0a3d62,
+    shininess: 30,
+    waveHeight: 20,
+    waveSpeed: 1.5
+  })
+})
+
+onUnmounted(() => {
+  if (vantaEffect) vantaEffect.destroy()
+})
 </script>
 
 <style scoped>
-.auth-container {
+/* 基础样式保持不变 */
+.login-container {
+  width: 100vw;
+  height: 100vh;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
-  background-color: #f0f9eb;
+  position: relative;
+  overflow: hidden;
 }
 
 .auth-card {
-  background: #fff;
-  padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 2.5rem;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   width: 400px;
   text-align: center;
+  position: relative;
+  z-index: 10;
 }
 
 .form-group,
-button,
 input {
   width: 320px;
   margin: 0 auto 1.5rem;
 }
 
+label {
+  display: block;
+  text-align: left;
+  margin-bottom: 0.5rem;
+  color: #555;
+}
+
+input {
+  padding: 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 1rem;
+}
+
+h1 {
+  margin-bottom: 2rem;
+  color: #0a3d62;
+}
+
+.auth-footer {
+  margin-top: 1.5rem;
+}
+
+.register-link {
+  color: #1e6091;
+  margin-left: 0.5rem;
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.register-link:hover {
+  color: #134e75;
+  text-decoration: underline;
+}
+
+/* 核心修改：按钮对齐样式 */
+/* 验证码按钮 - 与输入框同宽 */
 .captcha-group {
-  width: 340px;
-  margin: 0 auto 1.5rem;
+  /* 继承form-group的宽度约束，确保与输入框对齐 */
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* 水平居中 */
 }
 
-button:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
-
-/* 验证按钮样式 */
-.captcha-group button {
-  background-color: #4caf50;
+.captcha-btn {
+  width: 320px; /* 与输入框、登录按钮保持相同宽度 */
+  background-color: #3cbbb1;
   color: white;
   border: none;
   border-radius: 5px;
-  padding: 8px 16px;
+  padding: 0.8rem; /* 与登录按钮相同的内边距 */
+  font-size: 1rem; /* 统一字体大小 */
   cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 1.5rem; /* 与下方登录按钮保持一致间距 */
 }
 
-.captcha-group button:hover {
-  background-color: #45a049;
+.captcha-btn:hover {
+  background-color: #2a9d94;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 登录按钮 - 确保宽度一致 */
+.login-btn {
+  width: 320px; /* 关键：与验证码按钮同宽 */
+  background-color: #1e6091;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 0.8rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.login-btn:hover:not(:disabled) {
+  background-color: #134e75;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.login-btn:disabled {
+  background-color: #94bfe5;
+  cursor: not-allowed;
 }
 </style>

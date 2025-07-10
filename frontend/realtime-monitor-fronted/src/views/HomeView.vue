@@ -19,27 +19,9 @@
     </header>
 
     <div class="main-content">
-      <!-- 左侧边栏 -->
-      <aside class="sidebar">
-        <div class="sidebar-section">
-          <h3>操作选项</h3>
-          <div class="button-group">
-            <button @click="goToFaceRecognitionPage" :class="{ active: $route.path === '/face' }">入站人脸</button>
-            <button @click="goToMonitorPage" :class="{ active: $route.path === '/monitor' }">监控大屏</button>
-            <button @click="goToAlertPage" :class="{ active: $route.path === '/alert' }">警报处置</button>
-            <button @click="goToDevicePage" :class="{ active: $route.path === '/device' }">设备信息</button>
-          </div>
-        </div>
-        
-        <div class="sidebar-section">
-          <h3>菜单</h3>
-          <div class="button-group">
-            <button @click="goToAboutPage" :class="{ active: $route.path === '/about' }">关于系统</button>
-            <button @click="logout" class="logout-btn">退出登录</button>
-          </div>
-        </div>
-      </aside>
-
+      <!-- 引入侧边栏组件 -->
+      <Sidebar :currentPath="$route.path" />
+      
       <!-- 主内容区域 - 供其他页面填充 -->
       <main class="content-area">
         <slot />
@@ -51,40 +33,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+// 导入侧边栏组件
+import Sidebar from '../components/Sidebar.vue'  // 假设侧边栏组件文件名为 Sidebar.vue，需根据实际路径调整
 
 const router = useRouter()
 const route = useRoute()
 const role = ref('管理员')
 const nickname = ref('张三')
-
-const goToMonitorPage = () => {
-  router.push('/monitor')
-}
-
-const goToAlertPage = () => {
-  router.push('/alert')
-}
-
-const goToFaceRecognitionPage = () => {
-  router.push('/face');
-};
-
-const goToAboutPage = () => {
-  router.push('/about')
-}
-
-const goToDevicePage = () => {
-  router.push('/device');
-};
-
-const logout = () => {
-  // 清除本地存储的登录状态
-  localStorage.removeItem('authToken')
-  localStorage.removeItem('userInfo')
-  
-  // 跳转到登录页并替换历史记录
-  router.replace('/')
-}
 </script>
 
 <style scoped>
@@ -161,70 +116,6 @@ const logout = () => {
   height: calc(100vh - 60px);
 }
 
-/* 侧边栏样式 */
-.sidebar {
-  width: 220px;
-  background-color: #1e1e1e; /* 侧边栏深色背景 */
-  border-right: 1px solid #333; /* 深色边框 */
-  padding: 20px 0;
-  overflow-y: auto;
-}
-
-.sidebar-section {
-  margin-bottom: 30px;
-  padding: 0 15px;
-}
-
-.sidebar-section h3 {
-  margin: 0 0 15px 10px;
-  color: #ccc; /* 标题颜色 */
-  font-size: 16px;
-  font-weight: 600;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #333; /* 深色分隔线 */
-}
-
-.button-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.button-group button {
-  width: 100%;
-  padding: 12px 15px;
-  background-color: transparent;
-  color: #ccc; /* 按钮文本颜色 */
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  text-align: left;
-  transition: all 0.3s ease;
-}
-
-.button-group button:hover {
-  background-color: rgba(0, 123, 255, 0.2); /* 悬停效果 - 蓝色透明 */
-  color: #007bff;
-  transform: none;
-}
-
-.button-group button.active {
-  background-color: #007bff; /* 激活状态蓝色背景 */
-  color: white;
-}
-
-.logout-btn {
-  margin-top: 10px;
-  color: #f44336 !important; /* 退出按钮红色 */
-}
-
-.logout-btn:hover {
-  background-color: rgba(244, 67, 54, 0.1) !important;
-  color: #f44336 !important;
-}
-
 /* 内容区域样式 */
 .content-area {
   flex: 1;
@@ -233,24 +124,8 @@ const logout = () => {
   background-color: #121212; /* 主内容区域深色背景 */
 }
 
-/* 响应式适配 */
+/* 响应式适配 - 仅保留与顶部导航和内容区域相关的适配 */
 @media (max-width: 768px) {
-  .sidebar {
-    width: 60px;
-    padding: 20px 0;
-  }
-
-  .sidebar-section h3,
-  .button-group button span {
-    display: none;
-  }
-
-  .button-group button {
-    justify-content: center;
-    text-align: center;
-    padding: 12px 0;
-  }
-
   .header-left h1 {
     font-size: 16px;
   }

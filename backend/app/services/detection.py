@@ -3,7 +3,6 @@ import numpy as np
 from ultralytics import YOLO
 import os
 import face_recognition
-
 from app.services.danger_zone import DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD, TARGET_CLASSES
 from app.services.alerts import (
     add_alert, update_loitering_time, reset_loitering_time, get_loitering_time,

@@ -176,3 +176,8 @@ realtime-video-monitoring/
 4. **性能问题?**
    - 人脸识别和目标检测是计算密集型任务。在配置较低的机器上，实时处理的帧率可能会下降。
    - 考虑在后续开发中增加一个“性能模式”，例如通过降低检测频率或分辨率来提升流畅度。
+
+
+暴力检测模块启动方式（暂时）：
+cd backend/app/services
+python violenceDetect.py --camera --model vd.hdf5
