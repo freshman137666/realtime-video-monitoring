@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <!-- 顶部导航栏（复用） -->
+    <!-- 顶部导航栏 -->
     <header class="top-bar">
       <div class="header-left">
         <h1>车站实时视频监控系统</h1>
@@ -11,34 +11,16 @@
             <img src="https://via.placeholder.com/100" alt="用户头像">
           </div>
           <div class="name-role">
-            <h2>{{ nickname }}</h2>
-            <p>{{ role }}</p>
+            <h2>张三</h2>
+            <p>管理员</p>
           </div>
         </div>
       </div>
     </header>
 
     <div class="main-content">
-      <!-- 左侧边栏（复用） -->
-      <aside class="sidebar">
-        <div class="sidebar-section">
-          <h3>操作选项</h3>
-          <div class="button-group">
-            <button @click="goToFaceRecognitionPage" :class="{ active: $route.path === '/face' }">入站人脸</button>
-            <button @click="goToMonitorPage" :class="{ active: $route.path === '/monitor' }">监控大屏</button>
-            <button @click="goToAlertPage" :class="{ active: $route.path === '/alert' }">警报处置</button>
-            <button @click="goToDevicePage" :class="{ active: $route.path === '/device' }">设备信息</button>
-          </div>
-        </div>
-        
-        <div class="sidebar-section">
-          <h3>菜单</h3>
-          <div class="button-group">
-            <button @click="goToAboutPage" :class="{ active: $route.path === '/about' }">关于系统</button>
-            <button @click="logout" class="logout-btn">退出登录</button>
-          </div>
-        </div>
-      </aside>
+      <!-- 引入复用的侧边栏组件 -->
+      <Sidebar :currentPath="currentPath" />
 
       <!-- 主内容区域 - 入站人脸监控内容 -->
       <main class="content-area">
@@ -49,31 +31,25 @@
             <div class="video-container">
               <h2>监控视图</h2>
               <div class="video-wrapper">
-                <!-- 摄像头画面 (使用Canvas优化渲染) -->
-                <canvas v-if="activeSource === 'webcam'" ref="videoCanvas" class="webcam-canvas"></canvas>
+                <!-- Case 1: Webcam is active -->
+                <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
                 
-                <!-- 上传文件画面 -->
+                <!-- Case 2: An upload is active, so we check its type -->
                 <template v-else-if="activeSource === 'upload'">
                     <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
                     <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
                 </template>
 
-                <!-- 加载状态 -->
+                <!-- Case 3: Loading -->
                 <div v-else-if="activeSource === 'loading'" class="loading-state">
                   <p>正在处理文件，请稍候...</p>
                   <div class="loading-spinner"></div>
                 </div>
                 
-                <!-- 默认占位 -->
+                <!-- Case 4: Default placeholder -->
                 <div v-else class="video-placeholder">
                   <p>加载中或未连接视频源</p>
                 </div>
-              </div>
-              <!-- 网络状态指示 -->
-              <div v-if="activeSource === 'webcam'" class="network-status">
-                网络状态: 
-                <span :class="connectionQualityClass">{{ connectionQualityText }}</span>
-                ({{ frameRate.toFixed(1) }} FPS)
               </div>
             </div>
             
@@ -84,11 +60,9 @@
               <div class="control-section">
                 <h3>视频源</h3>
                 <div class="button-group">
-                  <button @click="toggleWebcam" 
-                          :class="{ 'active': activeSource === 'webcam', 'stop-btn': activeSource === 'webcam' }">
-                    {{ webcamButtonText }}
-                  </button>
-                  <button @click="uploadVideoFile" :class="{ active: activeSource === 'upload' }">上传视频</button>
+                  <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
+                  <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
+                  <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
                 </div>
                 <input 
                   type="file" 
@@ -137,73 +111,26 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
+import { ref, onMounted, onUnmounted } from 'vue'
+// 导入侧边栏组件
+import Sidebar from '../components/Sidebar.vue'
 
-// 路由与用户信息（复用）
-const router = useRouter()
+// 获取当前路由路径
 const route = useRoute()
-const role = ref('管理员')
-const nickname = ref('张三')
+const currentPath = route.path
 
-// 路由跳转方法（复用）
-const goToMonitorPage = () => {
-  router.push('/monitor')
-}
-
-const goToAlertPage = () => {
-  router.push('/alert')
-}
-
-const goToFaceRecognitionPage = () => {
-  router.push('/face');
-};
-
-const goToAboutPage = () => {
-  router.push('/about')
-}
-
-const goToDevicePage = () => {
-  router.push('/device');
-};
-
-const logout = () => {
-  localStorage.removeItem('authToken')
-  localStorage.removeItem('userInfo')
-  router.replace('/')
-}
-
-// 视频监控相关逻辑
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
 const API_BASE_URL = `${SERVER_ROOT_URL}/api`
 const VIDEO_FEED_URL = `${API_BASE_URL}/video_feed`
-const WEBSOCKET_URL = `ws://${window.location.hostname}:5000/ws/video_feed`
 
 // 状态变量
 const videoSource = ref('')
 const activeSource = ref('')
 const alerts = ref([])
 const fileInput = ref(null)
-const registeredUsers = ref([])
-const webcamButtonText = ref('开启摄像头')
-const isWebcamActive = ref(false)
-const videoCanvas = ref(null)
-const connectionQualityText = ref('良好')
-const connectionQualityClass = ref('quality-good')
-const frameRate = ref(0)
-
-// 视频优化相关变量
-let alertPollingInterval = null
-let websocket = null
-let frameBuffer = [] // 帧缓冲队列
-let lastFrameTime = 0
-let frameCount = 0
-let fpsUpdateTimer = null
-let imageLoadThrottle = 300 // 动态调整的帧间隔(ms)
-const MIN_THROTTLE = 100 // 最小帧间隔
-const MAX_THROTTLE = 1000 // 最大帧间隔
-const BUFFER_SIZE = 5 // 最大缓冲帧数
+const registeredUsers = ref([]) // 已注册用户列表
 
 // --- API 调用封装 ---
 const apiFetch = async (endpoint, options = {}) => {
@@ -217,7 +144,7 @@ const apiFetch = async (endpoint, options = {}) => {
   } catch (error) {
     console.error(`API调用失败 ${endpoint}:`, error);
     alert(`操作失败: ${error.message}`);
-    throw error;
+    throw error; // 重新抛出错误以便调用者可以捕获
   }
 };
 
@@ -234,6 +161,7 @@ const loadRegisteredUsers = async () => {
 const registerFace = () => {
   const name = prompt("请输入要注册人员的姓名:");
   if (name) {
+    // 触发隐藏的文件输入框
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/jpeg,image/jpg,image/png';
@@ -258,7 +186,7 @@ const handleFaceUpload = async (file, name) => {
       body: formData,
     });
     alert(data.message);
-    loadRegisteredUsers();
+    loadRegisteredUsers(); // 成功后刷新列表
   } catch (error) {
     // apiFetch中已处理错误
   }
@@ -269,7 +197,7 @@ const deleteFace = async (name) => {
     try {
       const data = await apiFetch(`/faces/${name}`, { method: 'DELETE' });
       alert(data.message);
-      loadRegisteredUsers();
+      loadRegisteredUsers(); // 成功后刷新列表
     } catch (error) {
       // apiFetch中已处理错误
     }
@@ -277,277 +205,27 @@ const deleteFace = async (name) => {
 };
 
 // --- 视频/图像处理 ---
-const toggleWebcam = () => {
-  if (isWebcamActive.value) {
-    stopWebcam()
-  } else {
-    startWebcam()
-  }
-}
-
-const startWebcam = async () => {
+const connectWebcam = () => {
+  // 添加时间戳来防止浏览器缓存
+  videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
   activeSource.value = 'webcam';
-  isWebcamActive.value = true;
-  webcamButtonText.value = '关闭摄像头';
-  
-  // 初始化Canvas
-  await nextTick();
-  if (videoCanvas.value) {
-    const ctx = videoCanvas.value.getContext('2d');
-    ctx.clearRect(0, 0, videoCanvas.value.width, videoCanvas.value.height);
-  }
-  
-  // 启动帧率计算
-  startFpsMonitoring();
-  
-  // 优先尝试WebSocket连接
-  if (window.WebSocket) {
-    startWebSocketStream();
-  } else {
-    // 降级使用HTTP轮询
-    startHttpStreamFallback();
-  }
-  
   startAlertPolling();
-}
+};
 
-const stopWebcam = () => {
-  // 停止WebSocket
-  if (websocket) {
-    websocket.close();
-    websocket = null;
-  }
-  
-  // 清空状态
-  activeSource.value = '';
-  isWebcamActive.value = false;
-  webcamButtonText.value = '开启摄像头';
-  frameBuffer = [];
-  frameRate.value = 0;
-  
-  // 清除定时器
-  stopAlertPolling();
-  if (fpsUpdateTimer) {
-    clearInterval(fpsUpdateTimer);
-    fpsUpdateTimer = null;
-  }
-  
-  // 清除Canvas
-  if (videoCanvas.value) {
-    const ctx = videoCanvas.value.getContext('2d');
-    ctx.clearRect(0, 0, videoCanvas.value.width, videoCanvas.value.height);
-  }
-}
-
-// WebSocket视频流 (优先方案)
-const startWebSocketStream = () => {
+const disconnectWebcam = async () => {
   try {
-    websocket = new WebSocket(WEBSOCKET_URL);
-    
-    websocket.onopen = () => {
-      console.log('WebSocket连接已建立');
-      connectionQualityText.value = '良好';
-      connectionQualityClass.value = 'quality-good';
-    };
-    
-    websocket.onmessage = (event) => {
-      // 处理收到的帧数据
-      if (event.data instanceof Blob) {
-        const img = new Image();
-        img.onload = () => {
-          addFrameToBuffer(img);
-        };
-        img.src = URL.createObjectURL(event.data);
-      }
-    };
-    
-    websocket.onerror = (error) => {
-      console.error('WebSocket错误:', error);
-      connectionQualityText.value = '连接错误';
-      connectionQualityClass.value = 'quality-poor';
-      // 降级到HTTP方案
-      if (isWebcamActive.value) {
-        startHttpStreamFallback();
-      }
-    };
-    
-    websocket.onclose = () => {
-      console.log('WebSocket连接已关闭');
-      if (isWebcamActive.value) {
-        connectionQualityText.value = '连接断开';
-        connectionQualityClass.value = 'quality-poor';
-        // 尝试重连
-        setTimeout(() => startWebSocketStream(), 3000);
-      }
-    };
-    
+    await apiFetch('/stop_video_feed', { method: 'POST' });
+    videoSource.value = '';
+    activeSource.value = '';
+    stopAlertPolling(); // 停止轮询告警信息
+    console.log('Webcam disconnected.');
   } catch (error) {
-    console.error('WebSocket初始化失败:', error);
-    startHttpStreamFallback();
+    console.error('Failed to disconnect webcam:', error);
+    alert('关闭摄像头失败。');
   }
-}
+};
 
-// HTTP轮询 fallback方案
-const startHttpStreamFallback = () => {
-  console.log('使用HTTP轮询模式');
-  
-  const loadNextFrame = () => {
-    if (!isWebcamActive.value) return;
-    
-    const img = new Image();
-    const startTime = Date.now();
-    
-    img.onload = () => {
-      // 计算加载时间，动态调整间隔
-      const loadTime = Date.now() - startTime;
-      adjustThrottleBasedOnLoadTime(loadTime);
-      
-      addFrameToBuffer(img);
-      
-      // 安排下一帧加载
-      setTimeout(loadNextFrame, imageLoadThrottle);
-    };
-    
-    img.onerror = () => {
-      console.error('帧加载失败，尝试重试');
-      connectionQualityText.value = '加载失败';
-      connectionQualityClass.value = 'quality-poor';
-      // 延长重试间隔
-      setTimeout(loadNextFrame, imageLoadThrottle * 2);
-    };
-    
-    // 添加时间戳防止缓存
-    img.src = `${VIDEO_FEED_URL}?t=${Date.now()}`;
-  };
-  
-  // 开始加载第一帧
-  loadNextFrame();
-}
-
-// 添加帧到缓冲队列
-const addFrameToBuffer = (img) => {
-  // 限制缓冲队列大小
-  if (frameBuffer.length >= BUFFER_SIZE) {
-    frameBuffer.shift(); // 移除最旧的帧
-  }
-  frameBuffer.push(img);
-  
-  // 如果没有正在渲染，立即开始渲染
-  if (frameBuffer.length === 1) {
-    renderNextFrame();
-  }
-  
-  // 更新连接质量
-  updateConnectionQuality();
-}
-
-// 渲染缓冲队列中的下一帧
-const renderNextFrame = () => {
-  if (!isWebcamActive.value || !videoCanvas.value || frameBuffer.length === 0) {
-    return;
-  }
-  
-  // 使用requestAnimationFrame优化渲染时机
-  requestAnimationFrame(() => {
-    const img = frameBuffer.shift();
-    const ctx = videoCanvas.value.getContext('2d');
-    
-    if (ctx && img) {
-      // 调整图像大小以适应Canvas
-      const canvasWidth = videoCanvas.value.clientWidth;
-      const canvasHeight = videoCanvas.value.clientHeight;
-      
-      // 设置Canvas实际尺寸以匹配显示尺寸（解决模糊问题）
-      videoCanvas.value.width = canvasWidth;
-      videoCanvas.value.height = canvasHeight;
-      
-      // 保持宽高比绘制
-      const aspectRatio = img.width / img.height;
-      let drawWidth, drawHeight;
-      
-      if (canvasWidth / canvasHeight > aspectRatio) {
-        drawHeight = canvasHeight;
-        drawWidth = canvasHeight * aspectRatio;
-      } else {
-        drawWidth = canvasWidth;
-        drawHeight = canvasWidth / aspectRatio;
-      }
-      
-      // 居中绘制
-      const x = (canvasWidth - drawWidth) / 2;
-      const y = (canvasHeight - drawHeight) / 2;
-      
-      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-      ctx.drawImage(img, x, y, drawWidth, drawHeight);
-      
-      // 更新帧计数
-      frameCount++;
-    }
-    
-    // 如果还有缓冲帧，继续渲染
-    if (frameBuffer.length > 0) {
-      renderNextFrame();
-    }
-  });
-}
-
-// 基于加载时间动态调整间隔
-const adjustThrottleBasedOnLoadTime = (loadTime) => {
-  // 如果加载时间超过当前间隔的80%，说明需要延长间隔
-  if (loadTime > imageLoadThrottle * 0.8) {
-    imageLoadThrottle = Math.min(imageLoadThrottle + 50, MAX_THROTTLE);
-  } 
-    // 如果加载时间很短，可以缩短间隔
-  else if (loadTime < imageLoadThrottle * 0.3 && imageLoadThrottle > MIN_THROTTLE) {
-    imageLoadThrottle = Math.max(imageLoadThrottle - 20, MIN_THROTTLE);
-  }
-}
-
-// 更新连接质量显示
-const updateConnectionQuality = () => {
-  const fps = frameRate.value;
-  
-  if (fps > 15) {
-    connectionQualityText.value = '优秀';
-    connectionQualityClass.value = 'quality-excellent';
-  } else if (fps > 10) {
-    connectionQualityText.value = '良好';
-    connectionQualityClass.value = 'quality-good';
-  } else if (fps > 5) {
-    connectionQualityText.value = '一般';
-    connectionQualityClass.value = 'quality-fair';
-  } else {
-    connectionQualityText.value = '较差';
-    connectionQualityClass.value = 'quality-poor';
-  }
-}
-
-// 启动帧率监控
-const startFpsMonitoring = () => {
-  frameCount = 0;
-  lastFrameTime = Date.now();
-  
-  if (fpsUpdateTimer) {
-    clearInterval(fpsUpdateTimer);
-  }
-  
-  // 每秒更新一次帧率
-  fpsUpdateTimer = setInterval(() => {
-    const now = Date.now();
-    const elapsed = (now - lastFrameTime) / 1000; // 秒
-    frameRate.value = frameCount / elapsed;
-    
-    // 重置计数
-    frameCount = 0;
-    lastFrameTime = now;
-  }, 1000);
-}
-
-// 上传视频文件处理
 const uploadVideoFile = () => {
-  if (isWebcamActive.value) {
-    stopWebcam()
-  }
   fileInput.value.click();
 };
 
@@ -555,6 +233,8 @@ const handleFileUpload = async (event) => {
   const file = event.target.files[0];
   if (!file) return;
   
+  // 显示加载状态
+  videoSource.value = '';
   activeSource.value = 'loading';
   
   const formData = new FormData();
@@ -566,29 +246,41 @@ const handleFileUpload = async (event) => {
       body: formData
     });
     
+    // 使用时间戳确保视频/图像被重新加载
     videoSource.value = `${SERVER_ROOT_URL}${data.file_url}?t=${new Date().getTime()}`;
     activeSource.value = 'upload';
+    
+    // 加载返回的告警信息
     alerts.value = data.alerts || [];
-    stopAlertPolling();
+    stopAlertPolling(); // 处理完成后停止轮询
 
   } catch (error) {
+    // apiFetch中已处理alert，这里重置状态
     activeSource.value = '';
   }
 };
 
-// 告警轮询控制
-const stopAlertPolling = () => {
-  if (alertPollingInterval) {
-    clearInterval(alertPollingInterval);
-    alertPollingInterval = null;
-  }
+// 判断URL是否为图像
+const isImageUrl = (url) => {
+  const lowerUrl = url.toLowerCase();
+  return lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg')
 }
 
+// 判断URL是否为视频
+const isVideoUrl = (url) => {
+  return url.toLowerCase().includes('.mp4')
+}
+
+// 定期轮询告警信息
+let alertPollingInterval = null
+
 const startAlertPolling = () => {
+  // 先清除之前的轮询
   if (alertPollingInterval) {
     clearInterval(alertPollingInterval)
   }
   
+  // 开始新的轮询
   alertPollingInterval = setInterval(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/alerts`)
@@ -596,20 +288,17 @@ const startAlertPolling = () => {
       alerts.value = data.alerts || []
     } catch (error) {
       console.error('Error fetching alerts:', error)
+      // 如果获取告警失败（例如服务器重启），则停止轮询
       stopAlertPolling();
     }
-  }, 2000) // 每2秒轮询一次
+  }, 2000) // 轮询频率为2秒
 }
 
-// 判断URL类型
-const isImageUrl = (url) => {
-  const lowerUrl = url.toLowerCase();
-  return lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg') || lowerUrl.includes('.png')
-}
-
-const isVideoUrl = (url) => {
-  return url.toLowerCase().includes('.mp4') || url.toLowerCase().includes('.mov') || 
-         url.toLowerCase().includes('.webm') || url.toLowerCase().includes('.avi')
+const stopAlertPolling = () => {
+  if (alertPollingInterval) {
+    clearInterval(alertPollingInterval);
+    alertPollingInterval = null;
+  }
 }
 
 // 生命周期钩子
@@ -618,8 +307,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  stopWebcam() // 组件卸载时确保关闭摄像头
-  stopAlertPolling()
+  if (alertPollingInterval) {
+    clearInterval(alertPollingInterval)
+  }
 })
 </script>
 
@@ -698,69 +388,6 @@ onUnmounted(() => {
   height: calc(100vh - 60px);
 }
 
-/* 侧边栏样式 */
-.sidebar {
-  width: 220px;
-  background-color: #1e1e1e;
-  border-right: 1px solid #333;
-  padding: 20px 0;
-  overflow-y: auto;
-}
-
-.sidebar-section {
-  margin-bottom: 30px;
-  padding: 0 15px;
-}
-
-.sidebar-section h3 {
-  margin: 0 0 15px 10px;
-  color: #ccc;
-  font-size: 16px;
-  font-weight: 600;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #333;
-}
-
-.sidebar .button-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.sidebar .button-group button {
-  width: 100%;
-  padding: 12px 15px;
-  background-color: transparent;
-  color: #ccc;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  text-align: left;
-  transition: all 0.3s ease;
-}
-
-.sidebar .button-group button:hover {
-  background-color: rgba(0, 123, 255, 0.2);
-  color: #007bff;
-}
-
-.sidebar .button-group button.active {
-  background-color: #007bff;
-  color: white;
-}
-
-.logout-btn {
-  margin-top: 10px;
-  color: #f44336 !important;
-}
-
-.logout-btn:hover {
-  background-color: rgba(244, 67, 54, 0.1) !important;
-  color: #f44336 !important;
-}
-
 /* 内容区域样式 */
 .content-area {
   flex: 1;
@@ -817,7 +444,7 @@ onUnmounted(() => {
   position: relative;
 }
 
-.webcam-canvas {
+.webcam-feed {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -860,7 +487,7 @@ onUnmounted(() => {
   margin-bottom: 1rem;
   color: #ccc;
 }
-/* 控制面板按钮组样式（与侧边栏区分） */
+/* 控制面板按钮组样式 */
 .control-panel .button-group {
   display: flex;
   gap: 1rem;
@@ -882,41 +509,18 @@ onUnmounted(() => {
   background-color: #007BFF;
 }
 
+.control-panel .button-group button:disabled {
+  background-color: #555;
+  cursor: not-allowed;
+}
+
 /* 关闭摄像头按钮样式 */
-.stop-btn {
+.disconnect-button {
   background-color: #f44336 !important;
 }
-.stop-btn:hover {
+.disconnect-button:hover {
   background-color: #d32f2f !important;
-}
-
-/* 网络状态指示样式 */
-.network-status {
-  margin-top: 1rem;
-  font-size: 0.9rem;
-  color: #ccc;
-  padding: 0.3rem 0;
-}
-
-.quality-excellent {
-  color: #4CAF50;
-  font-weight: bold;
-}
-
-.quality-good {
-  color: #8BC34A;
-}
-
-.quality-fair {
-  color: #FFC107;
-}
-
-.quality-poor {
-  color: #F44336;
-  font-weight: bold;
-}
-
-.alerts-container {
+}.alerts-container {
   height: 150px;
   overflow-y: auto;
   border: 1px solid #444;
@@ -984,29 +588,6 @@ onUnmounted(() => {
 
 /* 响应式适配 */
 @media (max-width: 768px) {
-  .sidebar {
-    width: 60px;
-    padding: 20px 0;
-  }
-
-  .sidebar-section h3 {
-    display: none;
-  }
-
-  .sidebar .button-group button {
-    justify-content: center;
-    text-align: center;
-    padding: 12px 0;
-    font-size: 0; /* 隐藏文字 */
-    position: relative;
-  }
-  
-  /* 可以在这里添加图标替代文字 */
-  .sidebar .button-group button::after {
-    content: attr(data-icon);
-    font-size: 16px;
-  }
-
   .header-left h1 {
     font-size: 16px;
   }
