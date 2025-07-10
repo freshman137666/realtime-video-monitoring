@@ -2,7 +2,7 @@ import argparse
 import os
 from app import create_app
 from ultralytics import YOLO
-from app.services import db_service
+from app.services import db_initial
 
 def main():
     # 解决 "OMP: Error #15" 警告
@@ -25,5 +25,5 @@ def main():
 
 if __name__ == "__main__":
     # 初始化数据库
-    db_service.init_database()
+    db_initial.init_database()
     main() 

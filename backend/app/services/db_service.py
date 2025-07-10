@@ -1,54 +1,101 @@
+import uuid
 import mysql.connector
+from werkzeug.security import generate_password_hash, check_password_hash
 from app.config import Config
 
-def init_database():
-    """初始化数据库和表结构"""
-    try:
-        # 创建数据库连接
-        conn = mysql.connector.connect(
-            host=Config.MYSQL_HOST,
-            port=Config.MYSQL_PORT,
-            user=Config.MYSQL_USER,
-            password=Config.MYSQL_PASSWORD
-        )
+class DBService:
+    def __init__(self):
+        self.config = {
+            'host': Config.MYSQL_HOST,
+            'port': Config.MYSQL_PORT,
+            'user': Config.MYSQL_USER,
+            'password': Config.MYSQL_PASSWORD,
+            'database': Config.MYSQL_DB,
+            'charset': Config.MYSQL_CHARSET
+        }
+
+    def get_connection(self):
+        return mysql.connector.connect(**self.config)
+
+    # 用户操作方法
+    def create_user(self, username, password, email):
+        """创建新用户"""
+        user_id = str(uuid.uuid4())
+        hashed_password = generate_password_hash(password)
+        
+        conn = self.get_connection()
         cursor = conn.cursor()
-        
-        # 创建数据库（如果不存在）
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {Config.MYSQL_DB} DEFAULT CHARSET {Config.MYSQL_CHARSET}")
-        cursor.execute(f"USE {Config.MYSQL_DB}")
-        
-        # 创建乘客表
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS passengers (
-             passenger_id VARCHAR(36) NOT NULL PRIMARY KEY COMMENT '乘客唯一标识符(UUID)',
-            id_card_number VARCHAR(18) UNIQUE COMMENT '身份证号码',
-            name VARCHAR(50) NOT NULL COMMENT '乘客姓名',
-            gender CHAR(1) COMMENT '性别(M-男, F-女)',
-            registered_face_feature JSON COMMENT '人脸特征向量(JSON格式)',
-            registration_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
-             blacklist_flag BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否在黑名单中',
-             blacklist_reason TEXT COMMENT '加入黑名单的原因',
-             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间'
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        """)
-        
-        # 创建人脸识别记录表
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS face_recognition_logs (
-            recognition_id VARCHAR(36) NOT NULL PRIMARY KEY COMMENT '识别记录ID(UUID)',
-            passenger_id VARCHAR(36) COMMENT '匹配到的乘客ID',
-            recognition_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '识别时间',
-            FOREIGN KEY (passenger_id) REFERENCES passengers(passenger_id) ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        """)
-        
-        print("✅ 数据库表创建成功!")
-        return True
-        
-    except mysql.connector.Error as err:
-        print(f"❌ 数据库初始化失败: {err}")
-        return False
-    finally:
-        if 'conn' in locals() and conn.is_connected():
+        try:
+            cursor.execute(
+                "INSERT INTO users (user_id, username, password, email) "
+                "VALUES (%s, %s, %s, %s)",
+                (user_id, username, hashed_password, email)
+            )
+            conn.commit()
+            return user_id
+        except mysql.connector.Error as err:
+            print(f"创建用户失败: {err}")
+            return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_user_by_username(self, username):
+        """根据用户名获取用户"""
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                "SELECT * FROM users WHERE username = %s",
+                (username,)
+            )
+            return cursor.fetchone()
+        except mysql.connector.Error as err:
+            print(f"查询用户失败: {err}")
+            return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_user_by_email(self, email):
+        """根据邮箱获取用户"""
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                "SELECT * FROM users WHERE email = %s",
+                (email,)
+            )
+            return cursor.fetchone()
+        except mysql.connector.Error as err:
+            print(f"查询用户失败: {err}")
+            return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def verify_user(self, username, password):
+        """验证用户凭据"""
+        user = self.get_user_by_username(username)
+        if user and check_password_hash(user['password'], password):
+            return user
+        return None
+
+    def update_login_time(self, user_id):
+        """更新用户最后登录时间"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE users SET last_login = CURRENT_TIMESTAMP "
+                "WHERE user_id = %s",
+                (user_id,)
+            )
+            conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"更新登录时间失败: {err}")
+            return False
+        finally:
             cursor.close()
             conn.close()
