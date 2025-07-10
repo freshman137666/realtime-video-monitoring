@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 import numpy as np
 
+from app.services import system_state
 from app.services.danger_zone import (
     DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD,
     save_danger_zone_config
@@ -178,3 +179,17 @@ def toggle_edit_mode():
     data = request.json
     edit_mode = data.get('edit_mode', False)
     return jsonify({"status": "success", "edit_mode": edit_mode}) 
+
+@config_bp.route("/detection_mode", methods=["GET", "POST"])
+def detection_mode():
+    """获取或设置检测模式"""
+    if request.method == "POST":
+        data = request.json
+        mode = data.get('mode')
+        if mode in ['object_detection', 'face_only']:
+            system_state.DETECTION_MODE = mode
+            print(f"检测模式已切换为: {system_state.DETECTION_MODE}")
+            return jsonify({"status": "success", "message": f"Detection mode set to {mode}"})
+        return jsonify({"status": "error", "message": "Invalid mode"}), 400
+    else:  # GET
+        return jsonify({"mode": system_state.DETECTION_MODE}) 

@@ -3,7 +3,7 @@ from flask import Blueprint, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 
 from app.services.detection import process_image, process_video
-from app.services.video import video_feed
+from app.services.video import video_feed, stop_video_feed_service
 from app.services.alerts import reset_alerts
 
 # 创建视频蓝图
@@ -30,6 +30,14 @@ def get_video_feed():
         description: 视频流正在传输.
     """
     return video_feed()
+
+@video_bp.route('/stop_video_feed', methods=['POST'])
+def stop_video_feed():
+    """停止摄像头视频流端点"""
+    if stop_video_feed_service():
+        return jsonify({"status": "success", "message": "Video feed stopped."})
+    else:
+        return jsonify({"status": "error", "message": "Failed to stop video feed."}), 500
 
 @video_bp.route('/upload', methods=['POST'])
 def upload_file():
