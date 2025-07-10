@@ -14,6 +14,11 @@ const router = createRouter({
       component: () => import('../views/AboutView.vue')
     },
     {
+      path: '/face',
+      name: 'face',
+      component: () => import('../views/FaceRecognition.vue')
+    },
+    {
       path: '/monitor',
       name: 'monitor',
       component: () => import('../views/MonitorView.vue')
@@ -37,14 +42,9 @@ const router = createRouter({
       component: () => import('../views/AlertView.vue')
     },
     {
-    path: '/face',
-    name: 'face',
-    component: () => import('../views/FaceRecognition.vue')
-    },
-    {
-    path: '/device',
-    name: 'device',
-    component: () => import('../views/DeviceView.vue')
+      path: '/device',
+      name: 'device',
+      component: () => import('../views/DeviceView.vue')
     },
   ]
 })
