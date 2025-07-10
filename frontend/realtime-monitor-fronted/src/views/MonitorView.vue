@@ -39,13 +39,7 @@
             <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
             <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
           </div>
-          <input 
-            type="file" 
-            ref="fileInput"
-            accept="video/mp4,image/jpeg,image/jpg"
-            style="display:none"
-            @change="handleFileUpload"
-          />
+          <!-- The hidden file input is no longer needed here -->
         </div>
 
         <!-- 检测模式选择 -->
@@ -140,17 +134,19 @@ const API_BASE_URL = `${SERVER_ROOT_URL}/api`
 const VIDEO_FEED_URL = `${API_BASE_URL}/video_feed`
 
 // 状态变量
-const videoSource = ref('')
-const activeSource = ref('')
+const videoSource = ref('') // 视频源URL
+const activeSource = ref('') // 'webcam', 'upload', 'loading'
 const editMode = ref(false)
 const alerts = ref([])
 const safetyDistance = ref(100)
 const loiteringThreshold = ref(2.0)
 const detectionMode = ref('object_detection') // 新增：检测模式状态
 const originalDangerZone = ref(null)
-const fileInput = ref(null)
+// const fileInput = ref(null) // No longer needed
 const faceFileInput = ref(null) // 用于人脸注册的文件输入
 const registeredUsers = ref([]) // 已注册用户列表
+const pollingIntervalId = ref(null) // 用于轮询的定时器ID
+const videoTaskId = ref(''); // 保存当前视频处理任务的ID
 
 // --- API 调用封装 ---
 const apiFetch = async (endpoint, options = {}) => {
@@ -296,6 +292,7 @@ const deleteFace = async (name) => {
 
 // --- 视频/图像处理 ---
 const connectWebcam = () => {
+  stopPolling(); // 如果有正在轮询的任务，先停止
   // 添加时间戳来防止浏览器缓存
   videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
   activeSource.value = 'webcam';
@@ -303,37 +300,94 @@ const connectWebcam = () => {
 };
 
 const uploadVideoFile = () => {
-  fileInput.value.click();
+  // 动态创建input元素，这是一个更可靠的方法
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'video/mp4,image/jpeg,image/jpg';
+  input.onchange = handleFileUpload;
+  input.click();
 };
 
 const handleFileUpload = async (event) => {
   const file = event.target.files[0];
   if (!file) return;
-  
-  // 显示加载状态
+
+  stopPolling(); // 开始新的上传前，停止任何已有的轮询
   videoSource.value = '';
   activeSource.value = 'loading';
-  
+
   const formData = new FormData();
   formData.append('file', file);
-  
+
   try {
-    const data = await apiFetch('/upload', {
+    const response = await fetch(`${API_BASE_URL}/upload`, {
       method: 'POST',
       body: formData
     });
-    
-    // 使用时间戳确保视频/图像被重新加载
-    videoSource.value = `${SERVER_ROOT_URL}${data.file_url}?t=${new Date().getTime()}`;
-    activeSource.value = 'upload';
-    
-    // 加载返回的告警信息
-    alerts.value = data.alerts || [];
-    stopAlertPolling(); // 处理完成后停止轮询
 
+    if (response.status === 202) {
+      // 异步处理视频
+      const data = await response.json();
+      videoTaskId.value = data.task_id;
+      startPolling(data.task_id);
+    } else if (response.ok) {
+      // 同步处理图片
+      const data = await response.json();
+      videoSource.value = `${SERVER_ROOT_URL}${data.file_url}?t=${new Date().getTime()}`;
+      activeSource.value = 'upload';
+      alerts.value = data.alerts || [];
+      stopAlertPolling(); // 处理完成后停止轮询
+    } else {
+      // 处理其他HTTP错误
+      const errorData = await response.json();
+      throw new Error(errorData.message || '文件上传失败');
+    }
   } catch (error) {
-    // apiFetch中已处理alert，这里重置状态
     activeSource.value = '';
+    alert(error.message || '操作失败: Failed to fetch');
+    console.error('File upload error:', error);
+  }
+};
+
+const startPolling = (taskId) => {
+  pollingIntervalId.value = setInterval(() => {
+    pollTaskStatus(taskId);
+  }, 2000); // 每2秒轮询一次
+};
+
+const stopPolling = () => {
+  if (pollingIntervalId.value) {
+    clearInterval(pollingIntervalId.value);
+    pollingIntervalId.value = null;
+    videoTaskId.value = '';
+  }
+};
+
+const pollTaskStatus = async (taskId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/video/task_status/${taskId}`);
+
+    if (response.status === 200) {
+      // 任务完成
+      stopPolling();
+      const data = await response.json();
+      videoSource.value = `${SERVER_ROOT_URL}${data.file_url}?t=${new Date().getTime()}`;
+      activeSource.value = 'upload';
+      alerts.value = data.alerts || [];
+    } else if (response.status === 202) {
+      // 任务仍在进行中
+      console.log('Video processing...');
+    } else {
+      // 任务失败或出现其他错误
+      stopPolling();
+      const errorData = await response.json();
+      throw new Error(errorData.message || '视频处理失败');
+    }
+  } catch (error) {
+    stopPolling();
+    activeSource.value = '';
+    alert(error.message);
+    console.error('Polling error:', error);
   }
 };
 
@@ -477,6 +531,7 @@ onUnmounted(() => {
   if (alertPollingInterval) {
     clearInterval(alertPollingInterval)
   }
+  stopPolling(); // 组件卸载时确保停止轮询
 })
 </script>
 

@@ -6,7 +6,7 @@ import face_recognition
 
 from app.services.danger_zone import DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD, TARGET_CLASSES
 from app.services.alerts import (
-    add_alert, update_loitering_time, reset_loitering_time, 
+    add_alert, update_loitering_time, reset_loitering_time, get_loitering_time,
     update_detection_time, get_alerts, reset_alerts
 )
 from app.utils.geometry import point_in_polygon, distance_to_polygon
@@ -97,9 +97,25 @@ def process_video(filepath, uploads_dir):
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     
-    # 创建视频写入器
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+    # 创建视频写入器 - 使用H.264编码器替代mp4v
+    try:
+        # 尝试使用H.264编码器
+        fourcc = cv2.VideoWriter_fourcc(*"avc1")
+        out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+        
+        # 如果H.264编码器不可用，回退到MJPG
+        if not out.isOpened():
+            print("警告: H.264编码器不可用，回退到MJPG")
+            output_path_avi = output_path.replace(".mp4", ".avi")
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            out = cv2.VideoWriter(output_path_avi, fourcc, fps, (frame_width, frame_height))
+            output_filename = output_filename.replace(".mp4", ".avi")
+    except Exception as e:
+        print(f"视频编码器错误: {e}")
+        # 最后的回退选项 - 使用无损编码
+        fourcc = cv2.VideoWriter_fourcc(*"DIB ")
+        out = cv2.VideoWriter(output_path.replace(".mp4", ".avi"), fourcc, fps, (frame_width, frame_height))
+        output_filename = output_filename.replace(".mp4", ".avi")
     
     # 初始化YOLOv8模型
     model = get_model()
@@ -130,24 +146,25 @@ def process_video(filepath, uploads_dir):
             # 执行目标追踪
             results = model.track(frame, persist=True)
             
-            # 获取处理后的帧, 我们不再使用plot()，而是自己绘制
-            processed_frame = frame.copy()
-            
-            # 绘制危险区域
-            overlay = processed_frame.copy()
+            # --- 绘图顺序调整 ---
+            # 1. 首先，绘制危险区域的半透明叠加层作为背景
+            overlay = frame.copy()
             danger_zone_pts = DANGER_ZONE.reshape((-1, 1, 2))
             cv2.fillPoly(overlay, [danger_zone_pts], (0, 0, 255))
-            cv2.addWeighted(overlay, 0.4, processed_frame, 0.6, 0, processed_frame)
-            cv2.polylines(processed_frame, [danger_zone_pts], True, (0, 0, 255), 3)
+            cv2.addWeighted(overlay, 0.4, frame, 0.6, 0, frame)
+            cv2.polylines(frame, [danger_zone_pts], True, (0, 0, 255), 3)
             
             # 在危险区域中添加文字
             danger_zone_center = np.mean(DANGER_ZONE, axis=0, dtype=np.int32)
-            cv2.putText(processed_frame, "Danger Zone", 
+            cv2.putText(frame, "Danger Zone", 
                         (danger_zone_center[0] - 60, danger_zone_center[1]),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
             
-            # 处理检测结果
-            process_detection_results(results, processed_frame, time_diff, frame_count)
+            # 2. 然后，在已经有了危险区域的帧上，处理检测结果（绘制追踪框、标签等前景）
+            process_detection_results(results, frame, time_diff, frame_count)
+            
+            # 3. 指定最终要写入的帧
+            processed_frame = frame
         
         elif system_state.DETECTION_MODE == 'face_only':
             processed_frame = frame.copy()
@@ -155,7 +172,18 @@ def process_video(filepath, uploads_dir):
             process_faces_only(processed_frame, frame_count, face_recognition_cache)
 
         # 写入处理后的帧到输出视频
-        out.write(processed_frame)
+        # 确保帧是BGR格式，这是OpenCV的标准格式
+        if processed_frame is not None:
+            # 确保帧是BGR格式，这是OpenCV的标准格式
+            if len(processed_frame.shape) == 2:  # 灰度图像
+                processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_GRAY2BGR)
+            elif processed_frame.shape[2] == 4:  # RGBA图像
+                processed_frame = cv2.cvtColor(processed_frame, cv2.COLOR_RGBA2BGR)
+            
+            # 打印帧信息，帮助调试
+            print(f"写入帧: 形状={processed_frame.shape}, 类型={processed_frame.dtype}, 最小值={processed_frame.min()}, 最大值={processed_frame.max()}")
+            
+            out.write(processed_frame)
     
     # 释放资源
     cap.release()
