@@ -1,19 +1,44 @@
 <template>
-  <div class="monitor-page">
-    <h1>实时视频监控系统</h1>
-    
-    <div class="monitor-container">
-      <div class="video-container">
-        <h2>监控视图</h2>
-        <div class="video-wrapper">
-          <!-- Case 1: Webcam is active -->
-          <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" />
+  <div class="app-container">
+    <!-- 顶部导航栏 -->
+    <header class="top-bar">
+      <div class="header-left">
+        <h1>车站实时视频监控系统</h1>
+      </div>
+      <div class="header-right">
+        <div class="profile-info">
+          <div class="avatar">
+            <img src="https://via.placeholder.com/100" alt="用户头像">
+          </div>
+          <div class="name-role">
+            <h2>张三</h2>
+            <p>管理员</p>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="main-content">
+      <!-- 引入复用的侧边栏组件 -->
+      <Sidebar :currentPath="currentPath" />
+
+      <!-- 主内容区域 - 实时视频监控系统内容 -->
+      <main class="content-area">
+        <div class="monitor-page">
+          <h1>实时视频监控系统</h1>
           
-          <!-- Case 2: An upload is active, so we check its type -->
-          <template v-else-if="activeSource === 'upload'">
-              <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
-              <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
-          </template>
+          <div class="monitor-container">
+            <div class="video-container">
+              <h2>监控视图</h2>
+              <div class="video-wrapper">
+                <!-- Case 1: Webcam is active -->
+                <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
+                
+                <!-- Case 2: An upload is active, so we check its type -->
+                <template v-else-if="activeSource === 'upload'">
+                    <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
+                    <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+                </template>
 
           <!-- Case 3: Loading -->
           <div v-else-if="activeSource === 'loading'" class="loading-state">
@@ -42,91 +67,97 @@
           <!-- The hidden file input is no longer needed here -->
         </div>
 
-        <!-- 检测模式选择 -->
-        <div class="control-section">
-          <h3>检测模式</h3>
-          <div class="button-group">
-            <button 
-              @click="setDetectionMode('object_detection')" 
-              :class="{ active: detectionMode === 'object_detection' }">
-              目标检测
-            </button>
-            <button 
-              @click="setDetectionMode('face_only')" 
-              :class="{ active: detectionMode === 'face_only' }">
-              纯人脸识别
-            </button>
-          </div>
-        </div>
-        
-        <!-- 危险区域编辑 -->
-        <div class="control-section">
-          <h3>危险区域设置</h3>
-          <div class="button-group">
-            <button @click="toggleEditMode" :class="{ active: editMode }">
-              {{ editMode ? '保存区域' : '编辑区域' }}
-            </button>
-            <button v-if="editMode" @click="cancelEdit">取消编辑</button>
-          </div>
-          <div v-if="editMode" class="edit-instructions">
-            <p>点击并拖动区域点以调整位置</p>
-            <p>右键点击删除点</p>
-            <p>双击添加新点</p>
-          </div>
-        </div>
-        
-        <!-- 参数设置 -->
-        <div class="control-section">
-          <h3>参数设置</h3>
-          <div class="setting-row">
-            <label>安全距离 (像素)</label>
-            <input type="range" v-model="safetyDistance" min="10" max="200" step="5" />
-            <span>{{ safetyDistance }}</span>
-          </div>
-          <div class="setting-row">
-            <label>警报阈值 (秒)</label>
-            <input type="range" v-model="loiteringThreshold" min="0.5" max="10" step="0.5" />
-            <span>{{ loiteringThreshold }}</span>
-          </div>
-          <button @click="updateSettings" class="apply-button">应用设置</button>
-        </div>
-        
-        <!-- 告警信息 -->
-        <div class="alert-section">
-          <h3>告警信息</h3>
-          <div class="alerts-container" :class="{ 'has-alerts': alerts.length > 0 }">
-            <div v-if="alerts.length > 0" class="alert-list">
-              <div v-for="(alert, index) in alerts" :key="index" class="alert-item">
-                {{ alert }}
+              <!-- 检测模式选择 -->
+              <div class="control-section">
+                <h3>检测模式</h3>
+                <div class="button-group">
+                  <button 
+                    @click="setDetectionMode('object_detection')" 
+                    :class="{ active: detectionMode === 'object_detection' }">
+                    目标检测
+                  </button>
+                  <button 
+                    @click="setDetectionMode('face_only')" 
+                    :class="{ active: detectionMode === 'face_only' }">
+                    纯人脸识别
+                  </button>
+                </div>
+              </div>
+              
+              <!-- 危险区域编辑 -->
+              <div class="control-section">
+                <h3>危险区域设置</h3>
+                <div class="button-group">
+                  <button @click="toggleEditMode" :class="{ active: editMode }">
+                    {{ editMode ? '保存区域' : '编辑区域' }}
+                  </button>
+                  <button v-if="editMode" @click="cancelEdit">取消编辑</button>
+                </div>
+                <div v-if="editMode" class="edit-instructions">
+                  <p>点击并拖动区域点以调整位置</p>
+                  <p>右键点击删除点</p>
+                  <p>双击添加新点</p>
+                </div>
+              </div>
+              
+              <!-- 参数设置 -->
+              <div class="control-section">
+                <h3>参数设置</h3>
+                <div class="setting-row">
+                  <label>安全距离 (像素)</label>
+                  <input type="range" v-model="safetyDistance" min="10" max="200" step="5" />
+                  <span>{{ safetyDistance }}</span>
+                </div>
+                <div class="setting-row">
+                  <label>警报阈值 (秒)</label>
+                  <input type="range" v-model="loiteringThreshold" min="0.5" max="10" step="0.5" />
+                  <span>{{ loiteringThreshold }}</span>
+                </div>
+                <button @click="updateSettings" class="apply-button">应用设置</button>
+              </div>
+              
+              <!-- 告警信息 -->
+              <div class="control-section">
+                <h3>告警信息</h3>
+                <div class="alerts-container" :class="{ 'has-alerts': alerts.length > 0 }">
+                  <div v-if="alerts.length > 0" class="alert-list">
+                    <div v-for="(alert, index) in alerts" :key="index" class="alert-item">
+                      {{ alert }}
+                    </div>
+                  </div>
+                  <p v-else>当前无告警信息</p>
+                </div>
+              </div>
+
+              <!-- 人员管理 -->
+              <div class="control-section">
+                <h3>人员管理</h3>
+                <div class="button-group">
+                  <button @click="registerFace" class="apply-button">添加人员</button>
+                </div>
+                <div class="user-list-container">
+                  <ul v-if="registeredUsers.length > 0">
+                    <li v-for="user in registeredUsers" :key="user">
+                      <span>{{ user }}</span>
+                      <button @click="deleteFace(user)" class="delete-button">删除</button>
+                    </li>
+                  </ul>
+                  <p v-else>未注册任何人员</p>
+                </div>
               </div>
             </div>
-            <p v-else>当前无告警信息</p>
           </div>
         </div>
-
-        <!-- 人员管理 -->
-        <div class="control-section">
-          <h3>人员管理 (Face Management)</h3>
-          <div class="button-group">
-            <button @click="registerFace" class="apply-button">添加人员</button>
-          </div>
-          <div class="user-list-container">
-            <ul v-if="registeredUsers.length > 0">
-              <li v-for="user in registeredUsers" :key="user">
-                <span>{{ user }}</span>
-                <button @click="deleteFace(user)" class="delete-button">删除</button>
-              </li>
-            </ul>
-            <p v-else>未注册任何人员</p>
-          </div>
-        </div>
-      </div>
+      </main>
     </div>
   </div>
 </template>
 
 <script setup>
+import { useRoute } from 'vue-router'
 import { ref, onMounted, onUnmounted } from 'vue'
+// 导入侧边栏组件
+import Sidebar from '../components/Sidebar.vue'
 
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
@@ -536,10 +567,97 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 复用的布局样式 */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: #121212;
+  color: #e0e0e0;
+}
+
+/* 顶部导航栏样式 */
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  height: 60px;
+  background-color: #1e1e1e;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-left h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.profile-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.name-role h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #e0e0e0;
+}
+
+.name-role p {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 主内容区域样式 */
+.main-content {
+  display: flex;
+  flex: 1;
+  height: calc(100vh - 60px);
+}
+
+/* 内容区域样式 */
+.content-area {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  background-color: #121212;
+}
+
+/* 实时视频监控页面特有样式 */
 .monitor-page {
+  width: 100%;
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
+  color: #fff;
+  background-color: #1a1a1a;
+  border-radius: 8px;
 }
 
 .monitor-page h1 {
@@ -557,12 +675,14 @@ onUnmounted(() => {
   min-width: 300px;
   border-radius: 8px;
   padding: 1.5rem;
+  background-color: #2d2d2d;
 }
 .video-container h2, .control-panel h2 {
   margin-top: 0;
   margin-bottom: 1.5rem;
   border-bottom: 1px solid #444;
   padding-bottom: 0.5rem;
+  color: #e0e0e0;
 }
 .video-wrapper {
   width: 100%;
@@ -574,7 +694,16 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
+
+.webcam-feed {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
 .video-wrapper img, .video-wrapper video {
   max-width: 100%;
   max-height: 100%;
@@ -611,12 +740,13 @@ onUnmounted(() => {
   margin-bottom: 1rem;
   color: #ccc;
 }
-.button-group {
+/* 控制面板按钮组样式 */
+.control-panel .button-group {
   display: flex;
   gap: 1rem;
   margin-bottom: 1rem;
 }
-.button-group button, .apply-button {
+.control-panel .button-group button, .apply-button {
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 4px;
@@ -625,18 +755,19 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background-color 0.3s;
 }
-.button-group button:hover, .apply-button:hover {
+.control-panel .button-group button:hover, .apply-button:hover {
   background-color: #45a049;
 }
-.button-group button.active {
+.control-panel .button-group button.active {
   background-color: #007BFF;
 }
 
-.button-group button:disabled {
+.control-panel .button-group button:disabled {
   background-color: #555;
   cursor: not-allowed;
 }
 
+/* 关闭摄像头按钮样式 */
 .disconnect-button {
   background-color: #f44336 !important;
 }
@@ -648,6 +779,10 @@ onUnmounted(() => {
   font-size: 0.9rem;
   color: #aaa;
   margin-top: 1rem;
+  background-color: #2a2a2e;
+  padding: 0.8rem;
+  border-radius: 4px;
+  border-left: 3px solid #007BFF;
 }
 
 .setting-row {
@@ -655,14 +790,26 @@ onUnmounted(() => {
   align-items: center;
   gap: 1rem;
   margin-bottom: 0.5rem;
+  padding: 0.5rem 0;
 }
 
 .setting-row label {
   flex-basis: 120px;
+  color: #ddd;
 }
 
 .setting-row input[type="range"] {
   flex-grow: 1;
+  accent-color: #4CAF50;
+}
+
+.setting-row span {
+  min-width: 40px;
+  text-align: center;
+  color: #ddd;
+  background-color: #3a3a3a;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
 }
 
 .alerts-container {
@@ -689,6 +836,13 @@ onUnmounted(() => {
   padding: 0.5rem;
   border-radius: 4px;
   color: #ffcccc;
+  border-left: 3px solid #f44336;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 .user-list-container {
@@ -697,6 +851,7 @@ onUnmounted(() => {
   border: 1px solid #444;
   padding: 0.5rem;
   border-radius: 4px;
+  background-color: #2a2a2e;
 }
 
 .user-list-container ul {
@@ -711,6 +866,11 @@ onUnmounted(() => {
   align-items: center;
   padding: 0.5rem;
   border-bottom: 1px solid #333;
+  transition: background-color 0.2s;
+}
+
+.user-list-container li:hover {
+  background-color: #3a3a3a;
 }
 
 .user-list-container li:last-child {
@@ -724,9 +884,34 @@ onUnmounted(() => {
   border: none;
   border-radius: 3px;
   cursor: pointer;
+  transition: background-color 0.2s;
 }
 
 .delete-button:hover {
-  background-color: #d32f2f;
+  background-color: #d32f2d;
 }
-</style> 
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+  .header-left h1 {
+    font-size: 16px;
+  }
+  
+  .monitor-container {
+    flex-direction: column;
+  }
+  
+  .video-wrapper {
+    height: 320px;
+  }
+  
+  .setting-row {
+    flex-wrap: wrap;
+  }
+  
+  .setting-row label {
+    flex-basis: 100%;
+    margin-bottom: 0.5rem;
+  }
+}
+</style>
