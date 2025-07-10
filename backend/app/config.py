@@ -12,3 +12,11 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
         'sqlite:///' + os.path.join(basedir, 'app.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False 
+
+     # 数据库配置
+    MYSQL_HOST = 'localhost'
+    MYSQL_PORT = 3306
+    MYSQL_USER = 'root'
+    MYSQL_PASSWORD = '123456'
+    MYSQL_DB = 'realtime_monitoring'
+    MYSQL_CHARSET = 'utf8mb4'
