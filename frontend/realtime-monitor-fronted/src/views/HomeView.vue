@@ -1,50 +1,59 @@
 <template>
-  <div class="monitor-page">
-    <h1>车站实时视频监控系统</h1>
-    <div class="monitor-container">
-      <!-- 中间按钮区域 -->
-      <div class="button-container">
-        <div class="control-section">
-          <h3>操作选项</h3>
-          <div class="button-group">
-            <button @click="goToFaceRecognitionPage" :class="{ active: false }">入站人脸</button>
-            <button @click="goToMonitorPage" :class="{ active: false }">监控大屏</button>
-            <button @click="goToAlertPage" :class="{ active: false }">警报处置</button>
-            <button @click="goToDevicePage" :class="{ active: false }">设备信息</button>
+  <div class="app-container">
+    <!-- 顶部导航栏 -->
+    <header class="top-bar">
+      <div class="header-left">
+        <h1>车站实时视频监控系统</h1>
+      </div>
+      <div class="header-right">
+        <div class="profile-info">
+          <div class="avatar">
+            <img src="https://via.placeholder.com/100" alt="用户头像">
+          </div>
+          <div class="name-role">
+            <h2>{{ nickname }}</h2>
+            <p>{{ role }}</p>
           </div>
         </div>
       </div>
-      <!-- 右侧个人信息区域 -->
-      <div class="control-panel">
-        <div class="control-section">
-          <h3>个人信息</h3>
-          <div class="profile-info">
-            <div class="avatar">
-              <img src="https://via.placeholder.com/100" alt="用户头像">
-            </div>
-            <div class="name-role">
-              <h2>{{ nickname }}</h2>
-              <p>{{ role }}</p>
-            </div>
+    </header>
+
+    <div class="main-content">
+      <!-- 左侧边栏 -->
+      <aside class="sidebar">
+        <div class="sidebar-section">
+          <h3>操作选项</h3>
+          <div class="button-group">
+            <button @click="goToFaceRecognitionPage" :class="{ active: $route.path === '/face' }">入站人脸</button>
+            <button @click="goToMonitorPage" :class="{ active: $route.path === '/monitor' }">监控大屏</button>
+            <button @click="goToAlertPage" :class="{ active: $route.path === '/alert' }">警报处置</button>
+            <button @click="goToDevicePage" :class="{ active: $route.path === '/device' }">设备信息</button>
           </div>
         </div>
-        <div class="control-section">
+        
+        <div class="sidebar-section">
           <h3>菜单</h3>
           <div class="button-group">
-            <button @click="goToAboutPage">关于系统</button>
+            <button @click="goToAboutPage" :class="{ active: $route.path === '/about' }">关于系统</button>
             <button @click="logout" class="logout-btn">退出登录</button>
           </div>
         </div>
-      </div>
+      </aside>
+
+      <!-- 主内容区域 - 供其他页面填充 -->
+      <main class="content-area">
+        <slot />
+      </main>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 const role = ref('管理员')
 const nickname = ref('张三')
 
@@ -79,99 +88,52 @@ const logout = () => {
 </script>
 
 <style scoped>
-.monitor-page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 20px;
+.app-container {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
-  background-color: var(--color-background);
+  background-color: #121212; /* 深色主题背景 */
+  color: #e0e0e0; /* 基础文本颜色 */
 }
 
-h1 {
-  text-align: center;
-  margin-bottom: 30px;
-  color: var(--color-heading);
-  font-size: 28px;
-}
-
-.monitor-container {
+/* 顶部导航栏样式 */
+.top-bar {
   display: flex;
-  gap: 20px;
-  justify-content: center;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  height: 60px;
+  background-color: #1e1e1e; /* 导航栏深色背景 */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
-.button-container {
-  flex: 2;
-  min-width: 640px;
-  max-width: 800px;
-}
-
-.control-panel {
-  flex: 1;
-  min-width: 300px;
-  max-width: 350px;
-}
-
-.control-section {
-  margin-bottom: 20px;
-  padding: 20px;
-  background-color: var(--color-background-soft);
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-h3 {
-  margin-bottom: 15px;
-  color: var(--color-heading);
-  font-size: 18px;
+.header-left h1 {
+  margin: 0;
+  font-size: 20px;
   font-weight: 600;
+  color: #e0e0e0;
 }
 
-.button-group {
+.header-right {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.button-group.vertical {
-  flex-direction: column;
-}
-
-button {
-  padding: 12px 16px;
-  background-color: var(--vt-c-indigo);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  text-align: center;
-}
-
-button:hover {
-  background-color: #1a2a3a;
-  transform: translateY(-2px);
-}
-
-button.active {
-  background-color: #2196F3;
+  align-items: center;
 }
 
 .profile-info {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 12px;
 }
 
 .avatar {
-  width: 80px;
-  height: 80px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  border: 3px solid var(--color-border);
+  border: 2px solid rgba(255, 255, 255, 0.3);
 }
 
 .avatar img {
@@ -182,34 +144,115 @@ button.active {
 
 .name-role h2 {
   margin: 0;
-  font-size: 20px;
-  color: var(--color-heading);
+  font-size: 16px;
+  color: #e0e0e0;
 }
 
 .name-role p {
-  margin: 5px 0 0;
-  color: var(--color-text);
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 主内容区域样式 */
+.main-content {
+  display: flex;
+  flex: 1;
+  height: calc(100vh - 60px);
+}
+
+/* 侧边栏样式 */
+.sidebar {
+  width: 220px;
+  background-color: #1e1e1e; /* 侧边栏深色背景 */
+  border-right: 1px solid #333; /* 深色边框 */
+  padding: 20px 0;
+  overflow-y: auto;
+}
+
+.sidebar-section {
+  margin-bottom: 30px;
+  padding: 0 15px;
+}
+
+.sidebar-section h3 {
+  margin: 0 0 15px 10px;
+  color: #ccc; /* 标题颜色 */
+  font-size: 16px;
+  font-weight: 600;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #333; /* 深色分隔线 */
+}
+
+.button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.button-group button {
+  width: 100%;
+  padding: 12px 15px;
+  background-color: transparent;
+  color: #ccc; /* 按钮文本颜色 */
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transition: all 0.3s ease;
+}
+
+.button-group button:hover {
+  background-color: rgba(0, 123, 255, 0.2); /* 悬停效果 - 蓝色透明 */
+  color: #007bff;
+  transform: none;
+}
+
+.button-group button.active {
+  background-color: #007bff; /* 激活状态蓝色背景 */
+  color: white;
 }
 
 .logout-btn {
-  background-color: #f44336 !important;
   margin-top: 10px;
+  color: #f44336 !important; /* 退出按钮红色 */
 }
 
 .logout-btn:hover {
-  background-color: #d32f2f !important;
+  background-color: rgba(244, 67, 54, 0.1) !important;
+  color: #f44336 !important;
 }
 
-@media (max-width: 1024px) {
-  .monitor-container {
-    flex-direction: column;
+/* 内容区域样式 */
+.content-area {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  background-color: #121212; /* 主内容区域深色背景 */
+}
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 60px;
+    padding: 20px 0;
   }
-  
-  .button-container,
-  .control-panel {
-    min-width: 100%;
-    max-width: 100%;
+
+  .sidebar-section h3,
+  .button-group button span {
+    display: none;
+  }
+
+  .button-group button {
+    justify-content: center;
+    text-align: center;
+    padding: 12px 0;
+  }
+
+  .header-left h1 {
+    font-size: 16px;
   }
 }
 </style>
