@@ -98,7 +98,7 @@ def identify_face(unknown_encoding):
         str: 匹配到的人员姓名或“Unknown”。
     """
     if not known_face_encodings:
-        return "Unknown"
+        return "Unknown", 999.0 # 返回一个元组，第二个值代表一个很大的距离
         
     # 将 NumPy 数组列表转换为单个 NumPy 数组
     known_face_encodings_np = np.array(known_face_encodings)

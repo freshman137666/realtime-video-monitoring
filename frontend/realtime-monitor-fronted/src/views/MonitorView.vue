@@ -35,8 +35,9 @@
         <div class="control-section">
           <h3>视频源</h3>
           <div class="button-group">
-            <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">摄像头</button>
-            <button @click="uploadVideoFile" :class="{ active: activeSource === 'upload' }">上传视频</button>
+            <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
+            <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
+            <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
           </div>
           <input 
             type="file" 
@@ -45,6 +46,23 @@
             style="display:none"
             @change="handleFileUpload"
           />
+        </div>
+
+        <!-- 检测模式选择 -->
+        <div class="control-section">
+          <h3>检测模式</h3>
+          <div class="button-group">
+            <button 
+              @click="setDetectionMode('object_detection')" 
+              :class="{ active: detectionMode === 'object_detection' }">
+              目标检测
+            </button>
+            <button 
+              @click="setDetectionMode('face_only')" 
+              :class="{ active: detectionMode === 'face_only' }">
+              纯人脸识别
+            </button>
+          </div>
         </div>
         
         <!-- 危险区域编辑 -->
@@ -128,6 +146,7 @@ const editMode = ref(false)
 const alerts = ref([])
 const safetyDistance = ref(100)
 const loiteringThreshold = ref(2.0)
+const detectionMode = ref('object_detection') // 新增：检测模式状态
 const originalDangerZone = ref(null)
 const fileInput = ref(null)
 const faceFileInput = ref(null) // 用于人脸注册的文件输入
@@ -146,6 +165,33 @@ const apiFetch = async (endpoint, options = {}) => {
     console.error(`API调用失败 ${endpoint}:`, error);
     alert(`操作失败: ${error.message}`);
     throw error; // 重新抛出错误以便调用者可以捕获
+  }
+};
+
+// --- 检测模式管理 ---
+const loadDetectionMode = async () => {
+  try {
+    const data = await apiFetch('/detection_mode');
+    detectionMode.value = data.mode;
+    console.log('Detection mode loaded:', data.mode);
+  } catch (error) {
+    // apiFetch中已处理错误
+  }
+};
+
+const setDetectionMode = async (mode) => {
+  if (detectionMode.value === mode) return; // 如果模式未变，则不执行任何操作
+  try {
+    const data = await apiFetch('/detection_mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: mode })
+    });
+    detectionMode.value = mode; // 成功后更新前端状态
+    alert(`检测模式已切换为: ${mode === 'object_detection' ? '目标检测' : '纯人脸识别'}`);
+    console.log(data.message);
+  } catch (error) {
+    // apiFetch中已处理错误
   }
 };
 
@@ -202,6 +248,19 @@ const registerFace = () => {
       }
     };
     input.click();
+  }
+};
+
+const disconnectWebcam = async () => {
+  try {
+    await apiFetch('/stop_video_feed', { method: 'POST' });
+    videoSource.value = '';
+    activeSource.value = '';
+    stopAlertPolling(); // 停止轮询告警信息
+    console.log('Webcam disconnected.');
+  } catch (error) {
+    console.error('Failed to disconnect webcam:', error);
+    alert('关闭摄像头失败。');
   }
 };
 
@@ -411,6 +470,7 @@ const startAlertPolling = () => {
 onMounted(() => {
   loadConfig()
   loadRegisteredUsers() // 页面加载时获取已注册用户
+  loadDetectionMode() // 新增：页面加载时获取当前检测模式
 })
 
 onUnmounted(() => {
@@ -515,6 +575,18 @@ onUnmounted(() => {
 }
 .button-group button.active {
   background-color: #007BFF;
+}
+
+.button-group button:disabled {
+  background-color: #555;
+  cursor: not-allowed;
+}
+
+.disconnect-button {
+  background-color: #f44336 !important;
+}
+.disconnect-button:hover {
+  background-color: #d32f2f !important;
 }
 
 .edit-instructions {
