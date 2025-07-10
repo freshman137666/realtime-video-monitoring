@@ -2,6 +2,10 @@ import face_recognition
 import numpy as np
 import os
 import json
+import mysql.connector
+import uuid
+from datetime import datetime
+from app.config import Config 
 
 # 定义用于存储人脸编码的路径
 # data目录位于项目的根目录下
@@ -29,6 +33,9 @@ def load_known_faces():
                 # JSON将numpy数组保存为列表，需要将其转换回来
                 known_face_encodings = [np.array(item['encoding']) for item in data]
             print(f"加载了 {len(known_face_names)} 个已知人脸。")
+           ############################## 
+            sync_face_features_to_db()
+
         except (json.JSONDecodeError, KeyError):
             # 如果文件损坏或格式不正确，则重新开始
             known_face_encodings = []
@@ -55,6 +62,9 @@ def save_known_faces():
     with open(ENCODINGS_FILE, 'w') as f:
         json.dump(data_to_save, f, indent=4)
     print(f"已将 {len(data_to_save)} 个人脸保存到 {ENCODINGS_FILE}。")
+    ############################
+    sync_face_features_to_db()
+
     return True
 
 def register_new_face(image_path, name):
@@ -97,30 +107,18 @@ def identify_face(unknown_encoding):
     返回:
         str: 匹配到的人员姓名或“Unknown”。
     """
-    if not known_face_encodings:
-        return "Unknown", 999.0 # 返回一个元组，第二个值代表一个很大的距离
+    if not known_face_names:
+        return "Unknown"
+
+    matches = face_recognition.compare_faces(known_face_encodings, unknown_encoding)
+    name = "Unknown"
+
+    # 使用第一个匹配项。
+    if True in matches:
+        first_match_index = matches.index(True)
+        name = known_face_names[first_match_index]
         
-    # 将 NumPy 数组列表转换为单个 NumPy 数组
-    known_face_encodings_np = np.array(known_face_encodings)
-    
-    # 计算当前人脸与所有已知人脸的距离
-    face_distances = face_recognition.face_distance(known_face_encodings_np, unknown_encoding)
-    
-    # 找到距离最近的人脸
-    best_match_index = np.argmin(face_distances)
-    
-    # 获取最佳匹配的距离值
-    best_distance = face_distances[best_match_index]
-    
-    # 假设我们设定一个阈值，例如 0.4。距离越小越相似。
-    # 这个阈值可以根据实际效果调整。
-    if best_distance < 0.4:
-        name = known_face_names[best_match_index]
-        print(f"识别到人脸: {name}, 距离: {best_distance:.2f}")
-        return name, best_distance # 返回名字和距离
-    
-    print(f"未识别到匹配的人脸，最近距离: {best_distance:.2f}")
-    return "Unknown", best_distance # 即使未知，也返回最近距离
+    return name
 
 def get_all_registered_names():
     """返回所有已注册姓名的列表"""
@@ -149,9 +147,106 @@ def delete_face(name):
     
     known_face_encodings = new_encodings
     known_face_names = new_names
-    
+   
+       # 删除数据库中的对应记录
+    try:
+        conn = mysql.connector.connect(
+            host=Config.MYSQL_HOST,
+            user=Config.MYSQL_USER,
+            password=Config.MYSQL_PASSWORD,
+            database=Config.MYSQL_DB
+        )
+        cursor = conn.cursor()
+        
+        # 删除数据库中的记录
+        delete_sql = "DELETE FROM passengers WHERE name = %s"
+        cursor.execute(delete_sql, (name,))
+        conn.commit()
+        print(f"已从数据库中删除乘客记录: {name}")
+        
+    except mysql.connector.Error as err:
+        print(f"数据库删除失败: {err}")
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+   
     save_known_faces()
     return True
+
+def sync_face_features_to_db():
+    """将内存中的人脸特征同步到数据库"""
+    try:
+        # 连接数据库
+        conn = mysql.connector.connect(
+            host=Config.MYSQL_HOST,
+            user=Config.MYSQL_USER,
+            password=Config.MYSQL_PASSWORD,
+            database=Config.MYSQL_DB
+        )
+        cursor = conn.cursor()
+        
+        # 处理每个人脸数据
+        for name, encoding in zip(known_face_names, known_face_encodings):
+            # 检查是否已存在该乘客
+            cursor.execute("SELECT passenger_id FROM passengers WHERE name = %s", (name,))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # 更新现有记录
+                passenger_id = existing[0]
+                update_sql = """
+                UPDATE passengers 
+                SET registered_face_feature = %s, last_updated = %s
+                WHERE passenger_id = %s
+                """
+                cursor.execute(update_sql, (
+                    json.dumps(encoding.tolist()), 
+                    datetime.now(), 
+                    passenger_id
+                ))
+                print(f"更新乘客记录: {name} (ID: {passenger_id})")
+            else:
+                # 插入新记录
+                passenger_id = str(uuid.uuid4())  # 使用UUID作为唯一标识符
+                
+                insert_sql = """
+                INSERT INTO passengers (
+                    passenger_id, name,  
+                    registered_face_feature, registration_time, 
+                    blacklist_flag, last_updated
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """
+                
+
+                
+                cursor.execute(insert_sql, (
+                    passenger_id,
+                    name,
+                    json.dumps(encoding.tolist()),
+                    datetime.now(),
+                    False,  # blacklist_flag默认False
+                    datetime.now()
+                ))
+                print(f"新增乘客记录: {name} (ID: {passenger_id})")
+        
+        conn.commit()
+        print(f"成功同步 {len(known_face_names)} 条人脸特征数据到数据库")
+        
+    except mysql.connector.Error as err:
+        print(f"数据库同步失败: {err}")
+    except Exception as e:
+        print(f"人脸特征同步失败: {str(e)}")
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+
+
+
+
+
 
 # 在模块启动时从文件加载已知人脸
 load_known_faces() 
