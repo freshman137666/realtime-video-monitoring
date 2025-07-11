@@ -2,11 +2,13 @@
 echo 实时视频监控系统启动脚本
 echo ====================================
 
-:: 启动后端
-echo 正在启动后端服务...
-start "后端服务" cmd /k "cd backend && run_backend.bat"
-
 :: 启动后端API服务
+call conda init
+call conda activate video_monitor || (
+    echo 错误: 无法激活 conda 环境 "video_monitor"
+    pause
+    exit /b 1
+)
 start "后端API服务" cmd /k "cd backend && python run.py --port 5000"
 
 

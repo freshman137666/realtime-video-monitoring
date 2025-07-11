@@ -3,7 +3,6 @@ import numpy as np
 from ultralytics import YOLO
 import os
 import face_recognition
-
 from app.services.danger_zone import DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD, TARGET_CLASSES
 from app.services.alerts import (
     add_alert, update_loitering_time, reset_loitering_time, get_loitering_time,
@@ -13,12 +12,39 @@ from app.utils.geometry import point_in_polygon, distance_to_polygon
 from app.services import face_service
 from app.services import system_state
 
-# YOLO模型路径
-MODEL_PATH = "yolov8n.pt"
+# --- 模型管理 ---
+# 我们现在需要管理两个模型
+# 升级到yolov8s-pose.pt以提高精度
+POSE_MODEL_PATH = "yolov8s-pose.pt"
+OBJECT_MODEL_PATH = "yolov8n.pt" # 原始模型
 
+# 全局变量来持有加载的模型
+pose_model = None
+object_model = None
+
+def get_pose_model():
+    """获取姿态估计模型实例"""
+    global pose_model
+    if pose_model is None:
+        pose_model = YOLO(POSE_MODEL_PATH)
+    return pose_model
+
+def get_object_model():
+    """获取通用目标检测模型实例"""
+    global object_model
+    if object_model is None:
+        object_model = YOLO(OBJECT_MODEL_PATH)
+    return object_model
+
+# (保留get_model函数以兼容旧代码，但现在让它返回目标检测模型)
 def get_model():
-    """获取YOLO模型实例"""
-    return YOLO(MODEL_PATH)
+    """获取YOLO模型实例（默认为目标检测）"""
+    return get_object_model()
+
+# 用于存储每个人姿态历史信息
+pose_history = {}
+FALL_DETECTION_THRESHOLD_SPEED = -15  # 重心Y坐标速度阈值 (像素/帧)
+FALL_DETECTION_THRESHOLD_STATE_FRAMES = 10 # 确认跌倒状态需要的帧数
 
 def process_image(filepath, uploads_dir):
     """
@@ -141,33 +167,37 @@ def process_video(filepath, uploads_dir):
         # 计算时间差
         time_diff = update_detection_time()
         
+        # --- 检测模式处理 ---
+        processed_frame = frame.copy() # 复制一份用于处理
+
         # 根据当前模式决定处理方式
         if system_state.DETECTION_MODE == 'object_detection':
             # 执行目标追踪
-            results = model.track(frame, persist=True)
+            results = get_object_model().track(processed_frame, persist=True)
             
             # --- 绘图顺序调整 ---
             # 1. 首先，绘制危险区域的半透明叠加层作为背景
-            overlay = frame.copy()
+            overlay = processed_frame.copy()
             danger_zone_pts = DANGER_ZONE.reshape((-1, 1, 2))
             cv2.fillPoly(overlay, [danger_zone_pts], (0, 0, 255))
-            cv2.addWeighted(overlay, 0.4, frame, 0.6, 0, frame)
-            cv2.polylines(frame, [danger_zone_pts], True, (0, 0, 255), 3)
+            cv2.addWeighted(overlay, 0.4, processed_frame, 0.6, 0, processed_frame)
+            cv2.polylines(processed_frame, [danger_zone_pts], True, (0, 0, 255), 3)
             
             # 在危险区域中添加文字
             danger_zone_center = np.mean(DANGER_ZONE, axis=0, dtype=np.int32)
-            cv2.putText(frame, "Danger Zone", 
+            cv2.putText(processed_frame, "Danger Zone", 
                         (danger_zone_center[0] - 60, danger_zone_center[1]),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
             
             # 2. 然后，在已经有了危险区域的帧上，处理检测结果（绘制追踪框、标签等前景）
-            process_detection_results(results, frame, time_diff, frame_count)
-            
-            # 3. 指定最终要写入的帧
-            processed_frame = frame
+            process_object_detection_results(results, processed_frame, time_diff, frame_count)
         
+        elif system_state.DETECTION_MODE == 'fall_detection':
+            # 执行姿态估计追踪
+            pose_results = get_pose_model().track(processed_frame, persist=True)
+            process_pose_estimation_results(pose_results, processed_frame, time_diff, frame_count)
+
         elif system_state.DETECTION_MODE == 'face_only':
-            processed_frame = frame.copy()
             # 优化：传入人脸识别缓存以保存状态
             process_faces_only(processed_frame, frame_count, face_recognition_cache)
 
@@ -200,15 +230,10 @@ def process_video(filepath, uploads_dir):
         "alerts": get_alerts()
     }
 
-def process_detection_results(results, frame, time_diff, frame_count):
+def process_object_detection_results(results, frame, time_diff, frame_count):
     """
-    处理检测结果，更新警报状态并在帧上绘制信息
-    
-    参数:
-        results: YOLO检测结果
-        frame: 当前视频帧
-        time_diff: 与上一帧的时间差
-        frame_count: 当前的帧数
+    处理通用目标检测结果（危险区域、徘徊等）
+    (这是您之前的 process_detection_results 函数，已重命名并保留)
     """
     # 如果有追踪结果，在画面上显示追踪ID和危险区域告警
     if hasattr(results[0], 'boxes') and hasattr(results[0].boxes, 'id') and results[0].boxes.id is not None:
@@ -259,7 +284,7 @@ def process_detection_results(results, frame, time_diff, frame_count):
             else:
                 # 如果不在区域内，重置停留时间
                 reset_loitering_time(id)
-                
+
                 # 如果距离小于安全距离，根据距离设置颜色从绿色到黄色
                 if distance < SAFETY_DISTANCE:
                     # 计算距离比例
@@ -327,6 +352,79 @@ def process_detection_results(results, frame, time_diff, frame_count):
             # 如果不在危险区域内但距离小于安全距离的2倍，绘制到危险区域的连接线
             if not in_danger_zone and distance < SAFETY_DISTANCE * 2:
                 draw_distance_line(frame, foot_point, distance)
+
+def process_pose_estimation_results(results, frame, time_diff, frame_count):
+    """
+    处理姿态估计结果，进行跌倒检测
+    """
+    # 如果有追踪结果，则进行跌倒检测
+    if hasattr(results[0], 'boxes') and hasattr(results[0].boxes, 'id') and results[0].boxes.id is not None:
+        boxes = results[0].boxes.xyxy.cpu().numpy()
+        ids = results[0].boxes.id.int().cpu().numpy()
+        keypoints = results[0].keypoints.xy.cpu().numpy()  # 获取关键点
+
+        # 首先，让YOLOv8的plot函数绘制基本的骨架和边界框
+        frame[:] = results[0].plot()
+
+        for person_id, box, kps in zip(ids, boxes, keypoints):
+            # --- 跌倒检测逻辑 ---
+            velocity_y = 0
+            angle = 90 # 默认为垂直
+
+            # 1. 计算人体中心点（质心）
+            visible_kps = kps[kps[:, 1] > 0] 
+            if len(visible_kps) > 4:
+                centroid_y = np.mean(visible_kps[:, 1])
+
+                # 2. 更新历史记录并计算垂直速度
+                if person_id in pose_history:
+                    prev_centroid_y, _ = pose_history[person_id][-1]
+                    velocity_y = centroid_y - prev_centroid_y
+                    
+                    pose_history[person_id].append((centroid_y, velocity_y))
+                    if len(pose_history[person_id]) > 30:
+                        pose_history[person_id].pop(0)
+
+                    # 3. 判断是否快速下坠 (速度为正表示向下,因为图像坐标系Y轴向下)
+                    if velocity_y > 15: # 阈值需要调试
+                        
+                        # 4. 确认跌倒状态: 检查身体主干角度
+                        left_shoulder, right_shoulder = kps[5], kps[6]
+                        left_hip, right_hip = kps[11], kps[12]
+
+                        # 确保关键点都可见
+                        if left_shoulder[1] > 0 and right_shoulder[1] > 0 and left_hip[1] > 0 and right_hip[1] > 0:
+                            shoulder_center = (left_shoulder + right_shoulder) / 2
+                            hip_center = (left_hip + right_hip) / 2
+                            body_vector = hip_center - shoulder_center
+                            
+                            # 避免除以零的错误
+                            if body_vector[0] != 0:
+                                # 计算身体与水平线的夹角
+                                angle = np.degrees(np.arctan(abs(body_vector[1] / body_vector[0])))
+                                
+                                # 角度小于45度，意味着身体更趋向于水平
+                                if angle < 45: 
+                                    alert_message = f"警告: 人员 {person_id} 可能已跌倒!"
+                                    add_alert(alert_message) # 修正：只传递一个参数
+                                    # 在人的边界框上方用红色字体标注
+                                    cv2.putText(frame, f"FALL DETECTED: ID {person_id}", 
+                                                (int(box[0]), int(box[1] - 10)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                else:
+                    # 初始化这个人的姿态历史记录
+                    pose_history[person_id] = [(centroid_y, 0)]
+
+            # --- 在画面上显示调试信息 ---
+            debug_text = f"ID:{person_id} V:{velocity_y:.1f} A:{angle:.1f}"
+            cv2.putText(frame, debug_text,
+                        (int(box[0]), int(box[1] - 35)), # 显示在FALL DETECTED文字的上方
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+
+# 为了保持兼容，我们将旧的函数重命名
+process_detection_results = process_object_detection_results
+
 
 def process_faces_only(frame, frame_count, face_mode_state):
     """

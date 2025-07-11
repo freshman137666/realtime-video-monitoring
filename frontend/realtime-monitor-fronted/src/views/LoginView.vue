@@ -6,7 +6,7 @@
       <h1>登录</h1>
       <form @submit.prevent="handleLogin">
         <div class="form-group">
-          <label for="email">邮箱</label>
+          <label for="email">用户名</label>
           <input id="email" type="email" v-model="email" required placeholder="请输入邮箱" />
         </div>
         <div class="form-group">
@@ -46,24 +46,44 @@ import { useRouter } from 'vue-router'
 import Vcode from "vue3-puzzle-vcode"
 import * as THREE from "three"
 import WAVES from "vanta/dist/vanta.waves.min"
+import { useAuthStore } from '@/stores/auth'
 
 const email = ref('admin@qq.com')
 const password = ref('123')
 const router = useRouter()
 const isShow = ref(false)
 const isVerified = ref(false)
+const authStore = useAuthStore()  // 创建状态管理实例
+const errorMsg = ref('') 
 
 const onShow = () => { isShow.value = true }
 const onClose = () => { isShow.value = false }
 const onSuccess = () => { isVerified.value = true; onClose() }
 
-const handleLogin = () => {
+const handleLogin = async () => {
   if (!isVerified.value) {
     alert('请先完成拼图验证！')
     return
   }
-  console.log('登录信息:', { email: email.value, password: password.value })
-  router.push('/home')
+  // 组装登录参数（与后端接口字段匹配）
+  const credentials = {
+    username: email.value,  // 如果你后端用username登录，就传这个；如果用email，改为email: email.value
+    password: password.value
+  }
+    try {
+    // 调用Pinia中的登录方法
+    const loginSuccess = await authStore.login(credentials)
+    if (loginSuccess) {
+      // 登录成功，跳转首页
+      router.push('/home')
+    } else {
+      errorMsg.value = '用户名或密码错误'
+    }
+  } catch (error) {
+    // 处理请求异常（如网络错误、后端500错误）
+    console.error('登录请求失败：', error)
+    errorMsg.value = '登录失败，请检查网络或联系管理员'
+  }
 }
 
 const login = ref(null)
