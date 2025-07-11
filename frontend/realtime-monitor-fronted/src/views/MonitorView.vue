@@ -81,6 +81,11 @@
                     :class="{ active: detectionMode === 'face_only' }">
                     纯人脸识别
                   </button>
+                  <button 
+                    @click="setDetectionMode('fall_detection')" 
+                    :class="{ active: detectionMode === 'fall_detection' }">
+                    跌倒检测
+                  </button>
                 </div>
               </div>
               
@@ -215,7 +220,15 @@ const setDetectionMode = async (mode) => {
       body: JSON.stringify({ mode: mode })
     });
     detectionMode.value = mode; // 成功后更新前端状态
-    alert(`检测模式已切换为: ${mode === 'object_detection' ? '目标检测' : '纯人脸识别'}`);
+    
+    // 创建一个映射来获取模式的中文名
+    const modeNames = {
+      'object_detection': '目标检测',
+      'face_only': '纯人脸识别',
+      'fall_detection': '跌倒检测'
+    };
+    alert(`检测模式已切换为: ${modeNames[mode] || mode}`);
+
     console.log(data.message);
   } catch (error) {
     // apiFetch中已处理错误
