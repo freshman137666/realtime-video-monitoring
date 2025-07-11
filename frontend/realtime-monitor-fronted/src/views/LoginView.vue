@@ -48,7 +48,7 @@ import * as THREE from "three"
 import WAVES from "vanta/dist/vanta.waves.min"
 
 const email = ref('admin@qq.com')
-const password = ref('')
+const password = ref('123')
 const router = useRouter()
 const isShow = ref(false)
 const isVerified = ref(false)
