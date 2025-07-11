@@ -69,6 +69,7 @@ def init_database():
             registration_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
             blacklist_flag BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否在黑名单中',
             blacklist_reason TEXT COMMENT '加入黑名单的原因',
+            image_path VARCHAR(255) COMMENT '注册人脸的图像文件路径',
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间'
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
