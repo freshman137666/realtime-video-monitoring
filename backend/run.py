@@ -1,5 +1,17 @@
 import argparse
 import os
+
+# --- 设置DeepFace模型下载路径 ---
+# 获取项目根目录 (backend/..)
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# 定义模型存储路径
+deepface_home = os.path.join(project_root, 'data', '.deepface_models')
+# 设置环境变量，DeepFace会使用这个路径
+os.environ['DEEPFACE_HOME'] = deepface_home
+# 确保目录存在
+os.makedirs(deepface_home, exist_ok=True)
+# --- 结束设置 ---
+
 from app import create_app
 from ultralytics import YOLO
 from app.services import db_initial

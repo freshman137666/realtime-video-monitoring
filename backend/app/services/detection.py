@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import os
-import face_recognition
 from app.services.danger_zone import DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD, TARGET_CLASSES
 from app.services.alerts import (
     add_alert, update_loitering_time, reset_loitering_time, get_loitering_time,
@@ -11,16 +10,27 @@ from app.services.alerts import (
 from app.utils.geometry import point_in_polygon, distance_to_polygon
 from app.services import face_service
 from app.services import system_state
+from deepface import DeepFace
+import time
+from concurrent.futures import ThreadPoolExecutor
 
-# --- 模型管理 ---
-# 我们现在需要管理两个模型
-# 升级到yolov8s-pose.pt以提高精度
-POSE_MODEL_PATH = "yolov8s-pose.pt"
-OBJECT_MODEL_PATH = "yolov8n.pt" # 原始模型
+# --- 模型管理 (使用相对路径) ---
+# 路径是相对于 backend/app/services/ 目录的
+# '..' 回退到 backend/app/
+# '../..' 回退到 backend/
+# '../../..' 回退到项目根目录
+BASE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..')
+MODEL_DIR = os.path.join(BASE_PATH, 'yolo-Weights') # 统一存放在 yolo-Weights 文件夹
+
+POSE_MODEL_PATH = os.path.join(MODEL_DIR, "yolov8s-pose.pt")
+OBJECT_MODEL_PATH = os.path.join(MODEL_DIR, "yolov8n.pt")
+FACE_MODEL_PATH = os.path.join(MODEL_DIR, "yolov8n-face-lindevs.pt")
+
 
 # 全局变量来持有加载的模型
 pose_model = None
 object_model = None
+face_model = None
 
 def get_pose_model():
     """获取姿态估计模型实例"""
@@ -35,6 +45,13 @@ def get_object_model():
     if object_model is None:
         object_model = YOLO(OBJECT_MODEL_PATH)
     return object_model
+
+def get_face_model():
+    """获取人脸检测和追踪模型实例"""
+    global face_model
+    if face_model is None:
+        face_model = YOLO(FACE_MODEL_PATH)
+    return face_model
 
 # (保留get_model函数以兼容旧代码，但现在让它返回目标检测模型)
 def get_model():
@@ -62,9 +79,12 @@ def process_image(filepath, uploads_dir):
     if img is None:
         return {"status": "error", "message": "Failed to load image"}, 500
     
-    # 执行对象检测
-    model = get_model()
-    detections = model(img)
+    # 为单张图片创建一个独立的、无状态的模型实例
+    # 这可以防止从视频流等其他操作中遗留的追踪器状态导致崩溃
+    model = YOLO(OBJECT_MODEL_PATH)
+    
+    # 使用 .predict() 明确表示这是单张图片预测
+    detections = model.predict(img)
     
     # 处理检测结果
     res_plotted = detections[0].plot()
@@ -143,8 +163,11 @@ def process_video(filepath, uploads_dir):
         out = cv2.VideoWriter(output_path.replace(".mp4", ".avi"), fourcc, fps, (frame_width, frame_height))
         output_filename = output_filename.replace(".mp4", ".avi")
     
-    # 初始化YOLOv8模型
-    model = get_model()
+    # 初始化此视频处理任务专用的YOLOv8模型
+    # 避免在多个后台任务中共享模型实例及其追踪器状态
+    object_model_local = YOLO(OBJECT_MODEL_PATH)
+    pose_model_local = YOLO(POSE_MODEL_PATH)
+    face_model_local = YOLO(FACE_MODEL_PATH)
     
     # 为本次视频处理创建一个新的人脸识别缓存
     face_recognition_cache = {}
@@ -173,7 +196,7 @@ def process_video(filepath, uploads_dir):
         # 根据当前模式决定处理方式
         if system_state.DETECTION_MODE == 'object_detection':
             # 执行目标追踪
-            results = get_object_model().track(processed_frame, persist=True)
+            results = object_model_local.track(processed_frame, persist=True)
             
             # --- 绘图顺序调整 ---
             # 1. 首先，绘制危险区域的半透明叠加层作为背景
@@ -194,11 +217,14 @@ def process_video(filepath, uploads_dir):
         
         elif system_state.DETECTION_MODE == 'fall_detection':
             # 执行姿态估计追踪
-            pose_results = get_pose_model().track(processed_frame, persist=True)
+            pose_results = pose_model_local.track(processed_frame, persist=True)
             process_pose_estimation_results(pose_results, processed_frame, time_diff, frame_count)
 
         elif system_state.DETECTION_MODE == 'face_only':
             # 优化：传入人脸识别缓存以保存状态
+            # 确保人脸模型被正确地传递给处理函数
+            if 'face_model' not in face_recognition_cache:
+                face_recognition_cache['face_model'] = face_model_local
             process_faces_only(processed_frame, frame_count, face_recognition_cache)
 
         # 写入处理后的帧到输出视频
@@ -426,64 +452,136 @@ def process_pose_estimation_results(results, frame, time_diff, frame_count):
 process_detection_results = process_object_detection_results
 
 
-def process_faces_only(frame, frame_count, face_mode_state):
+# --- 新的、带结果黏滞和多线程优化的高频人脸识别逻辑 ---
+
+def process_faces_only(frame, frame_count, state):
     """
-    专门处理纯人脸识别模式的函数（优化版）
+    使用YOLOv8追踪，并通过后台线程进行高频、非阻塞、结果稳定的识别。
     
     参数:
-        frame: 当前视频帧
-        frame_count: 当前的帧数
-        face_mode_state: 用于在帧之间保持状态的字典
+        state: 在多次调用间保持状态的字典。
     """
-    # 每3帧处理一次，以提高性能
-    if frame_count % 3 == 0:
-        # 缩小图像以加快检测速度
-        small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        # 将图像从BGR（OpenCV格式）转换为RGB（face_recognition格式）
-        rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-        
-        # 查找帧中的所有人脸
-        face_locations = face_recognition.face_locations(rgb_small_frame)
-        face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
-
-        current_faces = []
-        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-            # 识别人脸
-            name, distance = face_service.identify_face(face_encoding)
-            
-            # 因为我们缩小了图像，需要将坐标转换回原始尺寸
-            top *= 2
-            right *= 2
-            bottom *= 2
-            left *= 2
-            current_faces.append({"box": (top, right, bottom, left), "name": name})
-        
-        # 更新状态
-        face_mode_state['last_results'] = current_faces
+    # --- 1. 初始化 ---
+    if 'executor' not in state:
+        state['executor'] = ThreadPoolExecutor(max_workers=5)
+    if 'track_data' not in state:
+        state['track_data'] = {}
     
-    # 在每一帧都绘制最后一次的检测结果
-    if 'last_results' in face_mode_state:
-        for face_info in face_mode_state['last_results']:
-            box = face_info['box']
-            name = face_info['name']
-            (top, right, bottom, left) = box
-            
-            display_name = "Stranger"
-            label_color = (0, 0, 255) # 默认为陌生人红色
-            if name != "Unknown":
-                display_name = name
-                label_color = (0, 255, 0) # 识别成功为绿色
+    executor = state['executor']
+    track_data = state['track_data']
+    face_model = state.get('face_model')
+    if not face_model: return
 
-            # 绘制边框
-            cv2.rectangle(frame, (left, top), (right, bottom), label_color, 2)
+    # --- 2. 配置 ---
+    RECOGNITION_INTERVAL = 0.5  # (秒) 每0.5秒尝试识别一次
+    UNKNOWN_CONFIDENCE_THRESHOLD = 5 # 连续5次识别为陌生人才确认
+    BLUR_THRESHOLD = 25.0 # 大幅降低清晰度阈值，允许更多图像通过
+    FORCE_RECOGNITION_TIME = 3.0 # 即使图像模糊，也至少每3秒尝试一次识别
+
+    # --- 3. 追踪与状态清理 ---
+    face_results = face_model.track(frame, persist=True, verbose=False)
+    current_time = time.time()
+    
+    current_track_ids = set()
+    if face_results[0].boxes.id is not None:
+        current_track_ids = set(face_results[0].boxes.id.int().cpu().numpy())
+    
+    for track_id in list(track_data.keys()):
+        if track_id not in current_track_ids:
+            del track_data[track_id]
+
+    if face_results[0].boxes.id is None:
+        return
+
+    # --- 4. 处理每个被追踪的人脸 ---
+    boxes = face_results[0].boxes.xyxy.cpu().numpy()
+    track_ids = face_results[0].boxes.id.int().cpu().numpy()
+
+    for box, track_id in zip(boxes, track_ids):
+        if track_id not in track_data:
+            track_data[track_id] = {
+                "identity": "Identifying...",
+                "last_checked": 0,
+                "future": None,
+                "consecutive_unknowns": 0
+            }
+        
+        person = track_data[track_id]
+
+        # --- 5. 获取已完成的后台识别结果 ---
+        if person["future"] is not None and person["future"].done():
+            try:
+                # result会是一个元组, e.g., ('zjz', 0.45) 或 ('Stranger', None)
+                identity, distance = person["future"].result()
+                print(f"[Debug Detection] Task done for ID {track_id}. Result: {identity}, Dist: {distance}")
+                
+                # 'Stranger'是服务返回的原始结果，代表未识别
+                if identity == "Stranger":
+                    person["consecutive_unknowns"] += 1
+                else:
+                    # 只要有一次成功识别，就重置计数器并更新身份
+                    person["consecutive_unknowns"] = 0
+                    person["identity"] = identity
+                
+                # 只有连续失败达到阈值，才将最终身份标记为'Stranger'
+                if person["consecutive_unknowns"] >= UNKNOWN_CONFIDENCE_THRESHOLD:
+                    person["identity"] = "Stranger"
+
+                print(f"[Debug Detection] ID {track_id} new identity is '{person['identity']}'")
+
+            except Exception as e:
+                print(f"后台识别任务出错 (ID: {track_id}): {e}")
+                person["identity"] = "Error"
             
-            # 绘制标签背景
-            (w, h), _ = cv2.getTextSize(display_name, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-            cv2.rectangle(frame, (left, bottom - h - 10), (left + w, bottom), label_color, -1)
+            person["future"] = None # 清理任务
+
+        # --- 6. 提交新的识别任务到后台 ---
+        is_recognizing = person["future"] is not None
+        # 检查是否需要提交新的识别任务
+        time_since_last_check = current_time - person["last_checked"]
+        should_recognize = (time_since_last_check > RECOGNITION_INTERVAL) and not is_recognizing
+        
+        # 强制识别：如果长时间没有识别，并且当前状态是"Identifying..."，则强制提交任务
+        force_recognize = (time_since_last_check > FORCE_RECOGNITION_TIME) and (person["identity"] == "Identifying...")
+        
+        if should_recognize or force_recognize:
+            person["last_checked"] = current_time
             
-            # 绘制标签文本
-            cv2.putText(frame, display_name, (left, bottom - 5), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            x1, y1, x2, y2 = map(int, box)
+            padding = 10 # 增加一点边缘，提高识别率
+            face_crop = frame[max(0, y1-padding):min(frame.shape[0], y2+padding), 
+                              max(0, x1-padding):min(frame.shape[1], x2+padding)]
+
+            if face_crop.size > 0:
+                # --- 新增：图像质量评估 ---
+                gray_face = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+                clarity = cv2.Laplacian(gray_face, cv2.CV_64F).var()
+                
+                # 只有清晰的图像才送去识别，除非是强制识别
+                if clarity > BLUR_THRESHOLD or force_recognize:
+                    if force_recognize:
+                        print(f"[Debug Detection] FORCING recognition for ID {track_id} after {time_since_last_check:.1f}s. Current state: {person['identity']}")
+                    else:
+                        print(f"[Debug Detection] Submitting task for ID {track_id}. Clarity: {clarity:.2f}")
+                    
+                    future = executor.submit(face_service.identify_face_from_image, face_crop)
+                    person["future"] = future
+                else:
+                    # 对于模糊图像，我们不提交识别，但可以在此打印日志以供调试
+                    print(f"[Debug Detection] Skipped task for ID {track_id}. Clarity: {clarity:.2f} <= {BLUR_THRESHOLD}")
+
+        # --- 7. 绘制 ---
+        x1, y1, x2, y2 = map(int, box)
+        display_name = person["identity"]
+        
+        # 识别成功为绿色，其他情况（未知, 正在识别, 错误）为红色
+        color = (0, 255, 0) # 绿色
+        if display_name in ["Stranger", "Identifying...", "Error"]:
+            color = (0, 0, 255) # 红色
+            
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        label = f"ID:{track_id} {display_name}"
+        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
 
 def draw_distance_line(frame, foot_point, distance):

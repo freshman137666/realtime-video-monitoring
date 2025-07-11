@@ -1,16 +1,21 @@
 import cv2
 import numpy as np
 import os
+import time
 from flask import Response
 from ultralytics import YOLO
 
+from app.services import detection as detection_service
 from app.services.danger_zone import DANGER_ZONE
-from app.services.detection import process_detection_results, get_model, process_faces_only
 from app.services.alerts import update_detection_time, reset_alerts
 from app.services import system_state
 
 # 全局变量，用于控制摄像头视频流的循环
 CAMERA_ACTIVE = False
+# 全局变量来持有YOLO模型，避免重复加载
+model = None
+# 用于人脸识别模式的状态缓存
+face_recognition_cache = {}
 
 def video_feed():
     """实时视频流处理，包括目标检测和人脸识别"""
@@ -21,10 +26,8 @@ def video_feed():
     reset_alerts()
 
     # 初始化YOLO模型
-    model = get_model()
-    
-    # 为本次实时会话创建一个新的人脸识别缓存
-    face_recognition_cache = {}
+    global model
+    model = detection_service.get_model()
 
     # 打开默认摄像头
     cap = cv2.VideoCapture(0)
@@ -55,14 +58,24 @@ def video_feed():
             # 根据当前模式决定处理方式
             if system_state.DETECTION_MODE == 'object_detection':
                 # 使用YOLOv8进行目标追踪
-                results = model.track(frame, persist=True)
+                outputs = model.track(processed_frame, persist=True)
                 
                 # 在绘制的帧上应用我们的自定义检测逻辑
-                process_detection_results(results, processed_frame, time_diff, frame_count)
+                detection_service.process_detection_results(outputs, processed_frame, time_diff, frame_count)
             
             elif system_state.DETECTION_MODE == 'face_only':
-                # 只进行人脸识别（优化版）
-                process_faces_only(processed_frame, frame_count, face_recognition_cache)
+                # 确保已初始化人脸模式的状态字典和模型
+                if 'face_model' not in face_recognition_cache:
+                    face_recognition_cache['face_model'] = detection_service.get_face_model()
+                
+                # 传递当前时间戳给处理函数，用于计算识别间隔
+                face_recognition_cache['current_time'] = time.time()
+                
+                # 直接在原始帧上进行处理
+                detection_service.process_faces_only(frame, frame_count, face_recognition_cache)
+                
+                # 将处理结果复制到要编码的帧上
+                processed_frame = frame
             
             # 将处理后的帧编码为JPEG格式
             (flag, encodedImage) = cv2.imencode(".jpg", processed_frame)
