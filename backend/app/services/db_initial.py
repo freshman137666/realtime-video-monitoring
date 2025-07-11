@@ -173,7 +173,7 @@ def init_database():
         CREATE TABLE IF NOT EXISTS users (
             user_id VARCHAR(36) NOT NULL PRIMARY KEY COMMENT '用户唯一标识符(UUID)',
             username VARCHAR(50) NOT NULL UNIQUE COMMENT '用户名',
-            password VARCHAR(100) NOT NULL COMMENT '密码哈希',
+            password VARCHAR(100) NOT NULL COMMENT '明文密码',  -- 移除"哈希"注释
             email VARCHAR(100) NOT NULL UNIQUE COMMENT '邮箱',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
             last_login TIMESTAMP NULL COMMENT '最后登录时间',
