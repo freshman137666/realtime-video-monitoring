@@ -14,6 +14,7 @@ from app.services.smoking_detection_service import SmokingDetectionService
 from deepface import DeepFace
 import time
 from concurrent.futures import ThreadPoolExecutor
+from app.services import violenceDetect
 
 # --- 模型管理 (使用相对路径) ---
 # 路径是相对于 backend/app/services/ 目录的
@@ -113,6 +114,10 @@ def process_image(filepath, uploads_dir):
 
         # Call the processing function with the results, which draws on the frame
         res_plotted = process_smoking_detection_hybrid(res_plotted, person_results, face_results, smoking_model)
+
+    elif system_state.DETECTION_MODE == 'violence_detection':
+        # 暴力检测仅支持视频
+        return {"status": "error", "message": "暴力检测仅支持视频文件"}, 400
 
     else:
         # Default execution path must also use a fresh, local instance
@@ -266,6 +271,9 @@ def process_video(filepath, uploads_dir):
             process_smoking_detection_hybrid(
                 processed_frame, person_results, face_results, get_smoking_model()
             )
+        
+        elif system_state.DETECTION_MODE == 'violence_detection':
+            return process_violence_detection(filepath, uploads_dir)
             
         # 写入处理后的帧到输出视频
         # 确保帧是BGR格式，这是OpenCV的标准格式
@@ -684,3 +692,41 @@ def draw_distance_line(frame, foot_point, distance):
                     start_point = tuple(map(int, start_point))
                     end_point = tuple(map(int, end_point))
                     cv2.line(frame, start_point, end_point, (0, 0, 255), line_thickness + 1) 
+
+
+def process_violence_detection(filepath, uploads_dir):
+    """
+    使用 violenceDetect.py 进行暴力检测，处理视频并输出结果视频和警报。
+    """
+    import os
+    model_path = os.path.join(os.path.dirname(__file__), 'vd.hdf5')
+    try:
+        violence_prob, non_violence_prob = violenceDetect.predict_video(filepath, model_path=model_path)
+    except Exception as e:
+        return {"status": "error", "message": f"暴力检测失败: {str(e)}"}, 500
+
+    # 生成输出视频文件名（此处直接复制原视频，或可扩展为标注结果视频）
+    output_filename = 'processed_' + os.path.basename(filepath)
+    output_path = os.path.join(uploads_dir, output_filename)
+    if not os.path.exists(output_path):
+        import shutil
+        shutil.copy(filepath, output_path)
+    output_url = f"/api/files/{output_filename}"
+
+    # 生成警报信息
+    alerts = []
+    if violence_prob > 0.7:
+        alerts.append("warning: 检测到高概率暴力行为!")
+    elif violence_prob > 0.5:
+        alerts.append("caution: 检测到可能的暴力行为")
+    else:
+        alerts.append("safe: 未检测到明显暴力行为")
+
+    return {
+        "status": "success",
+        "media_type": "video",
+        "file_url": output_url,
+        "alerts": alerts,
+        "violenceProbability": float(violence_prob),
+        "nonViolenceProbability": float(non_violence_prob)
+    } 

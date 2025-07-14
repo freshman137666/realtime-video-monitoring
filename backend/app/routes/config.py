@@ -209,7 +209,7 @@ def detection_mode():
     if request.method == "POST":
         data = request.json
         mode = data.get('mode')
-        if mode in ['object_detection', 'face_only', 'fall_detection', 'smoking_detection']:
+        if mode in ['object_detection', 'face_only', 'fall_detection', 'smoking_detection', 'violence_detection']:
             system_state.DETECTION_MODE = mode
             print(f"检测模式已切换为: {system_state.DETECTION_MODE}")
             return jsonify({"status": "success", "message": f"Detection mode set to {mode}"})
