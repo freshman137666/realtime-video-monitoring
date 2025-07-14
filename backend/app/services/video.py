@@ -40,9 +40,12 @@ def video_feed():
         return Response("无法打开摄像头。", mimetype='text/plain')
 
     frame_count = 0
+    # --- 新增：FPS计算相关的变量 ---
+    prev_frame_time = 0
+    new_frame_time = 0
 
     def generate():
-        nonlocal frame_count
+        nonlocal frame_count, prev_frame_time, new_frame_time
         try:
             while CAMERA_ACTIVE:
                 ret, frame = cap.read()
@@ -50,13 +53,23 @@ def video_feed():
                     break
                     
                 frame_count += 1
+                
+                # --- 新增：FPS 计算 ---
+                new_frame_time = time.time()
+                # 避免除以零错误
+                time_diff_fps = new_frame_time - prev_frame_time
+                if time_diff_fps > 0:
+                    fps = 1 / time_diff_fps
+                    fps_text = f"FPS: {int(fps)}"
+                    cv2.putText(frame, fps_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                prev_frame_time = new_frame_time
 
                 # 诊断日志
                 if frame_count % 30 == 0:
                     print(f"[Diagnostics] Current detection mode: {system_state.DETECTION_MODE}")
                 
                 time_diff = update_detection_time()
-                processed_frame = frame.copy()
+                processed_frame = frame # 将带有FPS文本的帧作为处理的基础
 
                 # 根据当前模式决定处理方式 (All modes now use session-local models)
                 if system_state.DETECTION_MODE == 'object_detection':
