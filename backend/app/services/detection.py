@@ -11,7 +11,6 @@ from app.utils.geometry import point_in_polygon, distance_to_polygon
 from app.services.dlib_service import dlib_face_service
 from app.services import system_state
 from app.services.smoking_detection_service import SmokingDetectionService
-from deepface import DeepFace
 import time
 from concurrent.futures import ThreadPoolExecutor
 
