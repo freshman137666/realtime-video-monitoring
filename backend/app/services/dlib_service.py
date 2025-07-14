@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import logging
 import csv
+from concurrent.futures import ThreadPoolExecutor
 
 # --- Dlib 模型和数据路径定义 ---
 # 所有路径都应相对于 `backend/dlib_data` 目录构建
@@ -28,6 +29,11 @@ class DlibFaceService:
         初始化服务，加载所有必要的模型和数据。
         """
         logging.info("正在初始化 Dlib 人脸识别服务...")
+        
+        # --- 新增：为并行处理创建一个可复用的线程池 ---
+        # CPU核心数的一半是一个比较合理的线程数，避免过度竞争
+        max_workers = max(1, os.cpu_count() // 2)
+        self.executor = ThreadPoolExecutor(max_workers=max_workers)
 
         # 1. 加载 Dlib 模型
         try:
@@ -65,52 +71,46 @@ class DlibFaceService:
         else:
             logging.warning(f"特征文件 '{FEATURES_CSV_PATH}' 不存在或为空。")
 
+    def _recognize_single_face(self, args):
+        """
+        [内部工作函数] 在单个线程中处理一张人脸。
+        """
+        frame, box = args
+        left, top, right, bottom = [int(p) for p in box]
+        dlib_rect = dlib.rectangle(left, top, right, bottom)
+        
+        shape = self.predictor(frame, dlib_rect)
+        features = self.face_reco_model.compute_face_descriptor(frame, shape)
+        features = np.array(features)
+        
+        distances = np.linalg.norm(np.array(self.face_feature_known_list) - features, axis=1)
+        
+        if len(distances) > 0:
+            min_index = np.argmin(distances)
+            min_distance = distances[min_index]
+            if min_distance < 0.4:
+                return (self.face_name_known_list[min_index], box)
+        
+        return ("Unknown", box)
+
     def identify_faces(self, frame, face_boxes):
         """
-        在给定的图像帧中识别人脸。
-        参数:
-            frame (np.ndarray): OpenCV 格式的图像帧。
-            face_boxes (list): 由另一个检测器（如YOLOv8）提供的人脸边界框列表。
-                               每个边界框格式为 (left, top, right, bottom)。
-        返回:
-            list: 包含识别结果的列表，每个元素是 (name, box)。
+        在给定的图像帧中识别人脸 (已使用多线程优化)。
         """
-        recognized_faces = []
-        if not self.face_name_known_list:
-            # 如果数据库为空，直接返回未识别结果
-            for box in face_boxes:
-                recognized_faces.append(("Unknown", box))
-            return recognized_faces
+        if not self.face_name_known_list or not face_boxes:
+            return [("Unknown", box) for box in face_boxes]
 
-        for box in face_boxes:
-            # 修复：确保坐标是整数，以防止 Dlib 的 TypeError
-            left, top, right, bottom = [int(p) for p in box]
-            dlib_rect = dlib.rectangle(left, top, right, bottom)
-            
-            # 提取特征
-            shape = self.predictor(frame, dlib_rect)
-            features = self.face_reco_model.compute_face_descriptor(frame, shape)
-            features = np.array(features)
-            
-            # 与数据库中的特征进行比较
-            distances = np.linalg.norm(np.array(self.face_feature_known_list) - features, axis=1)
-            
-            # 寻找最佳匹配
-            if len(distances) > 0:
-                min_index = np.argmin(distances)
-                min_distance = distances[min_index]
-                
-                # Dlib 推荐的阈值是 0.6，但 0.4 更严格，可以减少误报
-                if min_distance < 0.4:
-                    name = self.face_name_known_list[min_index]
-                    # 确保返回的是原始的box，而不是dlib_rect
-                    recognized_faces.append((name, box))
-                else:
-                    recognized_faces.append(("Unknown", box))
-            else:
-                recognized_faces.append(("Unknown", box))
+        # 将任务打包，准备并行处理
+        tasks = [(frame, box) for box in face_boxes]
         
-        return recognized_faces
+        # 使用线程池并行执行识别任务
+        try:
+            results = list(self.executor.map(self._recognize_single_face, tasks))
+            return results
+        except Exception as e:
+            logging.error(f"人脸识别多线程处理出错: {e}")
+            # 如果多线程出错，回退到单线程模式以保证可用性
+            return [self._recognize_single_face(task) for task in tasks]
 
     def get_all_registered_names(self):
         """
