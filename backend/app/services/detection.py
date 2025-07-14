@@ -11,7 +11,6 @@ from app.utils.geometry import point_in_polygon, distance_to_polygon
 from app.services.dlib_service import dlib_face_service
 from app.services import system_state
 from app.services.smoking_detection_service import SmokingDetectionService
-from deepface import DeepFace
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -573,9 +572,12 @@ def process_faces_only(frame, frame_count, state):
         face_model_local = YOLO(FACE_MODEL_PATH)
         state['face_model'] = face_model_local
 
-    # 1. 使用 YOLOv8 进行人脸检测
+    # --- 性能诊断：步骤1 ---
+    t0 = time.time()
+    # 使用 YOLOv8 进行人脸检测
     # 修复：对于可能为静态图的场景，使用 .predict() 而不是 .track()
     face_results = face_model_local.predict(frame, verbose=False)
+    t1 = time.time()
     
     # 从结果中提取边界框
     boxes = [box.xyxy[0].tolist() for box in face_results[0].boxes] # 获取所有检测框
@@ -584,8 +586,14 @@ def process_faces_only(frame, frame_count, state):
     if not boxes:
         return
         
-    # 2. 将边界框传递给 Dlib 服务进行识别
+    # --- 性能诊断：步骤2 ---
+    t2 = time.time()
+    # 将边界框传递给 Dlib 服务进行识别
     recognized_faces = dlib_face_service.identify_faces(frame, boxes)
+    t3 = time.time()
+
+    # --- 打印诊断日志 ---
+    print(f"DIAGNOSTICS - YOLO Detection: {t1-t0:.4f}s, Dlib Recognition: {t3-t2:.4f}s")
     
     # 3. 在帧上绘制结果
     for name, box in recognized_faces:
