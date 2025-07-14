@@ -6,9 +6,11 @@ from flask import Response
 from ultralytics import YOLO
 
 from app.services import detection as detection_service
-from app.services.danger_zone import DANGER_ZONE
-from app.services.alerts import update_detection_time, reset_alerts
+from app.services.alerts import update_detection_time, reset_alerts, add_alert
 from app.services import system_state
+from app.services.violenceDetect import load_model_safely, process_frame as violence_process_frame, CUSTOM_OBJECTS
+import tensorflow as tf
+from collections import deque
 
 # 全局变量，用于控制摄像头视频流的循环
 CAMERA_ACTIVE = False
@@ -33,6 +35,16 @@ def video_feed():
     smoking_model_service = detection_service.get_smoking_model() # This is a stateless service wrapper
     face_recognition_cache = {} # Create a fresh cache for this session
 
+    # 暴力检测模型和特征提取器（仅在首次用到时加载）
+    violence_model = None
+    vgg_model = None
+    image_model_transfer = None
+    violence_buffer = deque(maxlen=20)
+    violence_status = "unknown"
+    violence_prob = 0.0
+    violence_last_infer_frame = -100
+    violence_infer_interval = 10  # 每10帧推理一次
+
     # 打开默认摄像头
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -45,7 +57,7 @@ def video_feed():
     new_frame_time = 0
 
     def generate():
-        nonlocal frame_count, prev_frame_time, new_frame_time
+
         try:
             while CAMERA_ACTIVE:
                 ret, frame = cap.read()
@@ -72,7 +84,46 @@ def video_feed():
                 processed_frame = frame # 将带有FPS文本的帧作为处理的基础
 
                 # 根据当前模式决定处理方式 (All modes now use session-local models)
-                if system_state.DETECTION_MODE == 'object_detection':
+                if system_state.DETECTION_MODE == 'violence_detection':
+                    # 初始化模型和特征提取器
+                    if violence_model is None:
+                        import os
+                        model_path = os.path.join(os.path.dirname(__file__), 'vd.hdf5')
+                        violence_model = load_model_safely(model_path)
+                        try:
+                            vgg_model = tf.keras.applications.VGG16(include_top=True, weights='imagenet')
+                        except Exception:
+                            vgg_model = tf.keras.applications.VGG16(include_top=True, weights=None)
+                        transfer_layer = vgg_model.get_layer('fc2')
+                        image_model_transfer = tf.keras.models.Model(inputs=vgg_model.input, outputs=transfer_layer.output)
+                    # 处理帧并加入缓冲区
+                    violence_buffer.append(violence_process_frame(frame))
+                    # 每N帧推理一次
+                    if len(violence_buffer) == 20 and (frame_count - violence_last_infer_frame >= violence_infer_interval):
+                        violence_last_infer_frame = frame_count
+                        try:
+                            transfer_values = image_model_transfer.predict(np.array(violence_buffer), verbose=0)
+                            prediction = violence_model.predict(np.array([transfer_values]), verbose=0)
+                            violence_prob = float(prediction[0][0])
+                            # 状态判断
+                            if violence_prob <= 0.5:
+                                violence_status = "safe"
+                            elif violence_prob <= 0.7:
+                                violence_status = "caution"
+                                add_alert("caution: 检测到可能的暴力行为")
+                            else:
+                                violence_status = "warning"
+                                add_alert("warning: 检测到高概率暴力行为!")
+                        except Exception as e:
+                            violence_status = "error"
+                            violence_prob = 0.0
+                            print(f"暴力检测推理异常: {e}")
+                    # 叠加状态到画面
+                    color = (0, 255, 0) if violence_status == "safe" else (0, 255, 255) if violence_status == "caution" else (0, 0, 255)
+                    cv2.putText(processed_frame, f"state: {violence_status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    cv2.putText(processed_frame, f"violenceProbability: {violence_prob:.4f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                
+                elif system_state.DETECTION_MODE == 'object_detection':
                     outputs = object_model_stream.track(processed_frame, persist=True)
                     detection_service.process_object_detection_results(outputs, processed_frame, time_diff, frame_count)
                 
