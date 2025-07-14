@@ -12,7 +12,7 @@ os.environ['DEEPFACE_HOME'] = deepface_home
 os.makedirs(deepface_home, exist_ok=True)
 # --- 结束设置 ---
 
-from app import create_app
+from app import create_app, socketio
 from ultralytics import YOLO
 from app.services import db_initial
 
@@ -32,8 +32,9 @@ def main():
     app = create_app()
     
     print(f"API server starting on http://{args.host}:{args.port}")
-    # 禁用自动重载 (use_reloader=False) 来防止服务因文件变化而意外重启
-    app.run(host=args.host, port=args.port, debug=True, use_reloader=False)
+    # 使用 socketio.run() 启动服务器，以支持 WebSocket
+    # allow_unsafe_werkzeug=True 是为了在 debug 模式下兼容新版 werkzeug
+    socketio.run(app, host=args.host, port=args.port, debug=True, use_reloader=False, allow_unsafe_werkzeug=True)
 
 if __name__ == "__main__":
     # 初始化数据库
