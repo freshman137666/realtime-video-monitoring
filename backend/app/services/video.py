@@ -12,22 +12,26 @@ from app.services import system_state
 
 # 全局变量，用于控制摄像头视频流的循环
 CAMERA_ACTIVE = False
-# 全局变量来持有YOLO模型，避免重复加载
-model = None
-# 用于人脸识别模式的状态缓存
-face_recognition_cache = {}
+# -- REMOVED --: Global model instances are removed to prevent state conflicts.
+# model = None
+# face_recognition_cache = {}
 
 def video_feed():
-    """实时视频流处理，包括目标检测和人脸识别"""
+    """实时视频流处理，为每个会话创建独立的模型实例。"""
     global CAMERA_ACTIVE
     CAMERA_ACTIVE = True
 
     # 重置警报，以便为新的实时会话提供干净的状态
     reset_alerts()
 
-    # 初始化YOLO模型
-    global model
-    model = detection_service.get_model()
+    # --- FIX: Create session-local model instances ---
+    # These instances live only for the duration of this camera session.
+    print("Initializing new model instances for real-time stream...")
+    object_model_stream = YOLO(detection_service.OBJECT_MODEL_PATH)
+    face_model_stream = YOLO(detection_service.FACE_MODEL_PATH)
+    pose_model_stream = YOLO(detection_service.POSE_MODEL_PATH)
+    smoking_model_service = detection_service.get_smoking_model() # This is a stateless service wrapper
+    face_recognition_cache = {} # Create a fresh cache for this session
 
     # 打开默认摄像头
     cap = cv2.VideoCapture(0)
@@ -39,66 +43,56 @@ def video_feed():
 
     def generate():
         nonlocal frame_count
-        while CAMERA_ACTIVE:
-            ret, frame = cap.read()
-            if not ret:
-                break
-                
-            frame_count += 1
+        try:
+            while CAMERA_ACTIVE:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                    
+                frame_count += 1
 
-            # 诊断日志: 打印当前检测模式
-            if frame_count % 30 == 0: # 每30帧打印一次，避免刷屏
-                print(f"[Diagnostics] Current detection mode: {system_state.DETECTION_MODE}")
-            
-            # 计算帧之间的时间差以进行徘徊检测
-            time_diff = update_detection_time()
+                # 诊断日志
+                if frame_count % 30 == 0:
+                    print(f"[Diagnostics] Current detection mode: {system_state.DETECTION_MODE}")
+                
+                time_diff = update_detection_time()
+                processed_frame = frame.copy()
 
-            processed_frame = frame.copy()
+                # 根据当前模式决定处理方式 (All modes now use session-local models)
+                if system_state.DETECTION_MODE == 'object_detection':
+                    outputs = object_model_stream.track(processed_frame, persist=True)
+                    detection_service.process_object_detection_results(outputs, processed_frame, time_diff, frame_count)
+                
+                elif system_state.DETECTION_MODE == 'fall_detection':
+                    pose_results = pose_model_stream.track(processed_frame, persist=True)
+                    detection_service.process_pose_estimation_results(pose_results, processed_frame, time_diff, frame_count)
 
-            # 根据当前模式决定处理方式
-            if system_state.DETECTION_MODE == 'object_detection':
-                # 使用YOLOv8进行目标追踪
-                outputs = model.track(processed_frame, persist=True)
+                elif system_state.DETECTION_MODE == 'face_only':
+                    # 修复：恢复 state 参数的传递，这是必须的
+                    if 'face_model' not in face_recognition_cache:
+                        face_recognition_cache['face_model'] = face_model_stream
+                    detection_service.process_faces_only(processed_frame, frame_count, face_recognition_cache)
                 
-                # 在绘制的帧上应用我们的自定义检测逻辑
-                detection_service.process_detection_results(outputs, processed_frame, time_diff, frame_count)
-            
-            elif system_state.DETECTION_MODE == 'fall_detection':
-                # 新增：处理跌倒检测模式
-                pose_model = detection_service.get_pose_model() # 获取姿态估计模型
-                pose_results = pose_model.track(processed_frame, persist=True)
-                detection_service.process_pose_estimation_results(pose_results, processed_frame, time_diff, frame_count)
+                elif system_state.DETECTION_MODE == 'smoking_detection':
+                    face_results = face_model_stream.predict(processed_frame, verbose=False)
+                    person_results = object_model_stream.track(processed_frame, persist=True, classes=[0], verbose=False)
+                    detection_service.process_smoking_detection_hybrid(
+                        processed_frame, person_results, face_results, smoking_model_service
+                    )
 
-            elif system_state.DETECTION_MODE == 'face_only':
-                # 确保已初始化人脸模式的状态字典和模型
-                if 'face_model' not in face_recognition_cache:
-                    face_recognition_cache['face_model'] = detection_service.get_face_model()
-                
-                # 传递当前时间戳给处理函数，用于计算识别间隔
-                face_recognition_cache['current_time'] = time.time()
-                
-                # 直接在原始帧上进行处理
-                detection_service.process_faces_only(frame, frame_count, face_recognition_cache)
-                
-                # 将处理结果复制到要编码的帧上
-                processed_frame = frame
-            
-            elif system_state.DETECTION_MODE == 'smoking_detection':
-                # 获取抽烟检测模型
-                smoking_model = detection_service.get_smoking_model()
-                # 执行检测
-                results = smoking_model.predict(processed_frame)
-                # 处理并绘制结果
-                detection_service.process_smoking_detection_results(results, processed_frame, smoking_model)
-
-            # 将处理后的帧编码为JPEG格式
-            (flag, encodedImage) = cv2.imencode(".jpg", processed_frame)
-            if not flag:
-                continue
-                
-            # 以multipart格式产生输出帧
-            yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
-                  bytearray(encodedImage) + b'\r\n')
+                # 将处理后的帧编码为JPEG格式
+                (flag, encodedImage) = cv2.imencode(".jpg", processed_frame)
+                if not flag:
+                    continue
+                    
+                # 以multipart格式产生输出帧
+                yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+                      bytearray(encodedImage) + b'\r\n')
+        finally:
+            # 确保无论如何都能释放摄像头
+            print("释放摄像头资源...")
+            cap.release()
+            cv2.destroyAllWindows()
             
     # 返回一个包含视频流的HTTP响应
     return Response(generate(),
