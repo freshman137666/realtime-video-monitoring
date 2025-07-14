@@ -24,8 +24,8 @@ class SmokingDetectionService:
         model.fuse()
         return model
 
-    def predict(self, frame):
-        return self.model(frame)
+    def predict(self, frame, imgsz=1024, **kwargs):
+        return self.model(frame, imgsz=imgsz, **kwargs)
 
     def plot_bboxes(self, results, frame):
         detections = Detections(

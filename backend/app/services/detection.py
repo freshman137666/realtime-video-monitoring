@@ -8,7 +8,7 @@ from app.services.alerts import (
     update_detection_time, get_alerts, reset_alerts
 )
 from app.utils.geometry import point_in_polygon, distance_to_polygon
-from app.services import face_service
+from app.services.dlib_service import dlib_face_service
 from app.services import system_state
 from app.services.smoking_detection_service import SmokingDetectionService
 from deepface import DeepFace
@@ -84,28 +84,49 @@ def process_image(filepath, uploads_dir):
     返回:
         dict: 包含处理结果的字典
     """
+    # 重置警报，以防上次调用的状态残留
+    reset_alerts()
+    
     # 读取图片
     img = cv2.imread(filepath)
     if img is None:
         return {"status": "error", "message": "Failed to load image"}, 500
     
-    # 为单张图片创建一个独立的、无状态的模型实例
-    # 这可以防止从视频流等其他操作中遗留的追踪器状态导致崩溃
-    model = YOLO(OBJECT_MODEL_PATH)
+    res_plotted = img.copy() # Start with a copy of the original image
     
-    # 使用 .predict() 明确表示这是单张图片预测
-    detections = model.predict(img)
+    # --- 修复：为静态图片处理添加模式判断 ---
+    if system_state.DETECTION_MODE == 'face_only':
+        # 在人脸识别模式下，直接调用人脸处理函数
+        # 注意：对于静态图片，我们没有追踪状态，所以创建一个临时的state
+        face_model_local = get_face_model()
+        state = {'face_model': face_model_local}
+        process_faces_only(res_plotted, 1, state) # frame_count 设为 1
     
-    # 处理检测结果
-    res_plotted = detections[0].plot()
-    
-    # 绘制危险区域
-    danger_zone_pts = DANGER_ZONE.reshape((-1, 1, 2))
-    overlay = res_plotted.copy()
-    cv2.fillPoly(overlay, [danger_zone_pts], (0, 0, 255))
-    cv2.addWeighted(overlay, 0.4, res_plotted, 0.6, 0, res_plotted)
-    cv2.polylines(res_plotted, [danger_zone_pts], True, (0, 0, 255), 3)
-    
+    elif system_state.DETECTION_MODE == 'smoking_detection':
+        # --- FIX: Use fresh, local model instances for stateless image processing ---
+        face_model_local = YOLO(FACE_MODEL_PATH)
+        object_model_local = YOLO(OBJECT_MODEL_PATH)
+        smoking_model = get_smoking_model() # This service is a stateless wrapper, it's fine
+
+        face_results = face_model_local.predict(img, verbose=False)
+        person_results = object_model_local.predict(img, classes=[0], verbose=False)
+
+        # Call the processing function with the results, which draws on the frame
+        res_plotted = process_smoking_detection_hybrid(res_plotted, person_results, face_results, smoking_model)
+
+    else:
+        # Default execution path must also use a fresh, local instance
+        model_local = YOLO(OBJECT_MODEL_PATH)
+        detections = model_local.predict(img)
+        res_plotted = detections[0].plot()
+        
+        # Draw danger zone overlay on the plotted results
+        danger_zone_pts = DANGER_ZONE.reshape((-1, 1, 2))
+        overlay = res_plotted.copy()
+        cv2.fillPoly(overlay, [danger_zone_pts], (0, 0, 255))
+        cv2.addWeighted(overlay, 0.4, res_plotted, 0.6, 0, res_plotted)
+        cv2.polylines(res_plotted, [danger_zone_pts], True, (0, 0, 255), 3)
+
     # 保存处理后的图像
     output_filename = 'processed_' + os.path.basename(filepath)
     output_path = os.path.join(uploads_dir, output_filename)
@@ -239,12 +260,13 @@ def process_video(filepath, uploads_dir):
             process_faces_only(processed_frame, frame_count, face_recognition_cache)
         
         elif system_state.DETECTION_MODE == 'smoking_detection':
-            # 执行抽烟检测
-            smoking_model_local = get_smoking_model() # 按需加载模型
-            results = smoking_model_local.predict(processed_frame)
-            process_smoking_detection_results(results, processed_frame, smoking_model_local)
-
-
+            # --- FIX: Use the local instances created for this specific video task ---
+            face_results = face_model_local.predict(processed_frame, verbose=False)
+            person_results = object_model_local.track(processed_frame, persist=True, classes=[0], verbose=False)
+            process_smoking_detection_hybrid(
+                processed_frame, person_results, face_results, get_smoking_model()
+            )
+            
         # 写入处理后的帧到输出视频
         # 确保帧是BGR格式，这是OpenCV的标准格式
         if processed_frame is not None:
@@ -275,11 +297,71 @@ def process_video(filepath, uploads_dir):
     }
 
 
-def process_smoking_detection_results(results, frame, model_service):
-    """处理抽烟检测结果"""
-    frame, is_smoking_detected = model_service.plot_bboxes(results, frame)
-    if is_smoking_detected:
-        add_alert("Smoking Detected")
+def process_smoking_detection_hybrid(frame, person_results, face_results, smoking_model):
+    """
+    Refactored hybrid detection to avoid tracker state conflicts.
+    This function now receives pre-computed detection results.
+    """
+    frame_h, frame_w = frame.shape[:2]
+
+    person_boxes = person_results[0].boxes.xyxy.cpu().numpy().astype(int) if hasattr(person_results[0].boxes, 'xyxy') else []
+    face_boxes = face_results[0].boxes.xyxy.cpu().numpy().astype(int) if hasattr(face_results[0].boxes, 'xyxy') else []
+
+    processed_person_indices = set()
+
+    # High-confidence channel
+    for f_box in face_boxes:
+        fx1, fy1, fx2, fy2 = f_box
+        face_w, face_h = fx2 - fx1, fy2 - fy1
+        face_center_x = fx1 + face_w // 2
+
+        for i, p_box in enumerate(person_boxes):
+            if i in processed_person_indices:
+                continue
+            px1, _, px2, _ = p_box
+            if px1 < face_center_x < px2:
+                roi_x1 = max(0, fx1 - face_w // 2)
+                roi_y1 = max(0, fy1 - face_h // 2)
+                roi_x2 = min(frame_w, fx2 + face_w // 2)
+                roi_y2 = min(frame_h, fy2 + face_h)
+                
+                roi_crop = frame[roi_y1:roi_y2, roi_x1:roi_x2]
+                if roi_crop.size == 0: continue
+
+                smoking_results = smoking_model.predict(roi_crop, imgsz=640, verbose=False)
+                if len(smoking_results[0].boxes) > 0:
+                    add_alert("Smoking Detected (High-Confidence)")
+                    for s_box in smoking_results[0].boxes:
+                        s_xyxy = s_box.xyxy.cpu().numpy().astype(int)[0]
+                        abs_x1, abs_y1 = s_xyxy[0] + roi_x1, s_xyxy[1] + roi_y1
+                        abs_x2, abs_y2 = s_xyxy[2] + roi_x1, s_xyxy[3] + roi_y1
+                        cv2.rectangle(frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 0, 255), 2)
+                        cv2.putText(frame, "Smoking", (abs_x1, abs_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                
+                processed_person_indices.add(i)
+                break
+
+    # Low-confidence channel
+    for i, p_box in enumerate(person_boxes):
+        if i in processed_person_indices:
+            continue
+
+        px1, py1, px2, py2 = p_box
+        upper_body_y2 = py1 + int((py2 - py1) * 0.6)
+        upper_body_crop = frame[py1:upper_body_y2, px1:px2]
+        if upper_body_crop.size == 0: continue
+
+        smoking_results = smoking_model.predict(upper_body_crop, imgsz=1024, verbose=False)
+        if len(smoking_results[0].boxes) > 0:
+            add_alert("Smoking Detected (Low-Confidence/Distant)")
+            for s_box in smoking_results[0].boxes:
+                s_xyxy = s_box.xyxy.cpu().numpy().astype(int)[0]
+                abs_x1, abs_y1 = s_xyxy[0] + px1, s_xyxy[1] + py1
+                abs_x2, abs_y2 = s_xyxy[2] + px1, s_xyxy[3] + py1
+                cv2.rectangle(frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 165, 255), 2)
+                cv2.putText(frame, "Smoking?", (abs_x1, abs_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+
+    return frame
 
 
 def process_object_detection_results(results, frame, time_diff, frame_count):
@@ -482,132 +564,58 @@ process_detection_results = process_object_detection_results
 
 def process_faces_only(frame, frame_count, state):
     """
-    使用YOLOv8追踪，并通过后台线程进行高频、非阻塞、结果稳定的识别。
-    
-    参数:
-        state: 在多次调用间保持状态的字典。
+    只进行人脸检测和识别的处理。
+    使用 YOLOv8 进行检测，使用 Dlib 进行识别。
+    这个函数现在直接在传入的 frame 上绘图，不再返回新的 frame。
     """
-    # --- 1. 初始化 ---
-    if 'executor' not in state:
-        state['executor'] = ThreadPoolExecutor(max_workers=5)
-    if 'track_data' not in state:
-        state['track_data'] = {}
-    
-    executor = state['executor']
-    track_data = state['track_data']
-    face_model = state.get('face_model')
-    if not face_model: return
+    face_model_local = state.get('face_model')
+    if face_model_local is None:
+        face_model_local = YOLO(FACE_MODEL_PATH)
+        state['face_model'] = face_model_local
 
-    # --- 2. 配置 ---
-    RECOGNITION_INTERVAL = 0.5  # (秒) 每0.5秒尝试识别一次
-    UNKNOWN_CONFIDENCE_THRESHOLD = 5 # 连续5次识别为陌生人才确认
-    BLUR_THRESHOLD = 25.0 # 大幅降低清晰度阈值，允许更多图像通过
-    FORCE_RECOGNITION_TIME = 3.0 # 即使图像模糊，也至少每3秒尝试一次识别
-
-    # --- 3. 追踪与状态清理 ---
-    face_results = face_model.track(frame, persist=True, verbose=False)
-    current_time = time.time()
+    # 1. 使用 YOLOv8 进行人脸检测
+    # 修复：对于可能为静态图的场景，使用 .predict() 而不是 .track()
+    face_results = face_model_local.predict(frame, verbose=False)
     
-    current_track_ids = set()
-    if face_results[0].boxes.id is not None:
-        current_track_ids = set(face_results[0].boxes.id.int().cpu().numpy())
+    # 从结果中提取边界框
+    boxes = [box.xyxy[0].tolist() for box in face_results[0].boxes] # 获取所有检测框
     
-    for track_id in list(track_data.keys()):
-        if track_id not in current_track_ids:
-            del track_data[track_id]
-
-    if face_results[0].boxes.id is None:
+    # 如果没有检测到人脸，直接返回
+    if not boxes:
         return
-
-    # --- 4. 处理每个被追踪的人脸 ---
-    boxes = face_results[0].boxes.xyxy.cpu().numpy()
-    track_ids = face_results[0].boxes.id.int().cpu().numpy()
-
-    for box, track_id in zip(boxes, track_ids):
-        if track_id not in track_data:
-            track_data[track_id] = {
-                "identity": "Identifying...",
-                "last_checked": 0,
-                "future": None,
-                "consecutive_unknowns": 0
-            }
         
-        person = track_data[track_id]
-
-        # --- 5. 获取已完成的后台识别结果 ---
-        if person["future"] is not None and person["future"].done():
-            try:
-                # result会是一个元组, e.g., ('zjz', 0.45) 或 ('Stranger', None)
-                identity, distance = person["future"].result()
-                print(f"[Debug Detection] Task done for ID {track_id}. Result: {identity}, Dist: {distance}")
+    # 2. 将边界框传递给 Dlib 服务进行识别
+    recognized_faces = dlib_face_service.identify_faces(frame, boxes)
+    
+    # 3. 在帧上绘制结果
+    for name, box in recognized_faces:
+        # 双重保险：再次确保坐标是整数
+        left, top, right, bottom = [int(p) for p in box]
+        color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
                 
-                # 'Stranger'是服务返回的原始结果，代表未识别
-                if identity == "Stranger":
-                    person["consecutive_unknowns"] += 1
-                else:
-                    # 只要有一次成功识别，就重置计数器并更新身份
-                    person["consecutive_unknowns"] = 0
-                    person["identity"] = identity
-                
-                # 只有连续失败达到阈值，才将最终身份标记为'Stranger'
-                if person["consecutive_unknowns"] >= UNKNOWN_CONFIDENCE_THRESHOLD:
-                    person["identity"] = "Stranger"
-
-                print(f"[Debug Detection] ID {track_id} new identity is '{person['identity']}'")
-
-            except Exception as e:
-                print(f"后台识别任务出错 (ID: {track_id}): {e}")
-                person["identity"] = "Error"
-            
-            person["future"] = None # 清理任务
-
-        # --- 6. 提交新的识别任务到后台 ---
-        is_recognizing = person["future"] is not None
-        # 检查是否需要提交新的识别任务
-        time_since_last_check = current_time - person["last_checked"]
-        should_recognize = (time_since_last_check > RECOGNITION_INTERVAL) and not is_recognizing
+        # 绘制边界框
+        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
         
-        # 强制识别：如果长时间没有识别，并且当前状态是"Identifying..."，则强制提交任务
-        force_recognize = (time_since_last_check > FORCE_RECOGNITION_TIME) and (person["identity"] == "Identifying...")
+        # 准备绘制名字的文本
+        label = f"{name}"
         
-        if should_recognize or force_recognize:
-            person["last_checked"] = current_time
-            
-            x1, y1, x2, y2 = map(int, box)
-            padding = 10 # 增加一点边缘，提高识别率
-            face_crop = frame[max(0, y1-padding):min(frame.shape[0], y2+padding), 
-                              max(0, x1-padding):min(frame.shape[1], x2+padding)]
-
-            if face_crop.size > 0:
-                # --- 新增：图像质量评估 ---
-                gray_face = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
-                clarity = cv2.Laplacian(gray_face, cv2.CV_64F).var()
-                
-                # 只有清晰的图像才送去识别，除非是强制识别
-                if clarity > BLUR_THRESHOLD or force_recognize:
-                    if force_recognize:
-                        print(f"[Debug Detection] FORCING recognition for ID {track_id} after {time_since_last_check:.1f}s. Current state: {person['identity']}")
-                    else:
-                        print(f"[Debug Detection] Submitting task for ID {track_id}. Clarity: {clarity:.2f}")
-                    
-                    future = executor.submit(face_service.identify_face_from_image, face_crop)
-                    person["future"] = future
-                else:
-                    # 对于模糊图像，我们不提交识别，但可以在此打印日志以供调试
-                    print(f"[Debug Detection] Skipped task for ID {track_id}. Clarity: {clarity:.2f} <= {BLUR_THRESHOLD}")
-
-        # --- 7. 绘制 ---
-        x1, y1, x2, y2 = map(int, box)
-        display_name = person["identity"]
+        (label_width, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
         
-        # 识别成功为绿色，其他情况（未知, 正在识别, 错误）为红色
-        color = (0, 255, 0) # 绿色
-        if display_name in ["Stranger", "Identifying...", "Error"]:
-            color = (0, 0, 255) # 红色
-            
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        label = f"ID:{track_id} {display_name}"
-        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+        # --- 智能定位标签位置 ---
+        label_bg_height = 20 # 标签背景的高度
+        
+        # 判断标签应该放在框内还是框外
+        if top - label_bg_height < 5: # 增加一个5像素的边距
+            # 空间不足，放在内部
+            cv2.rectangle(frame, (left, top), (left + label_width + 4, top + label_bg_height), color, -1)
+            cv2.putText(frame, label, (left + 2, top + label_bg_height - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        else:
+            # 空间充足，放在外部
+            cv2.rectangle(frame, (left, top - label_bg_height), (left + label_width + 4, top), color, -1)
+            cv2.putText(frame, label, (left + 2, top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+    # 不再返回 frame，因为是直接在原图上修改
+    # return frame
 
 
 def draw_distance_line(frame, foot_point, distance):

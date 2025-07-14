@@ -18,6 +18,24 @@
       </div>
     </header>
 
+    <!-- 新增：人脸注册模态框 -->
+    <div v-if="showRegistrationModal" class="registration-modal-overlay">
+      <div class="registration-modal-content">
+        <h2>正在为 "{{ registrationName }}" 注册人脸</h2>
+        <div class="registration-video-container">
+          <video ref="registrationVideoEl" autoplay playsinline class="registration-video"></video>
+        </div>
+        <div class="registration-status">
+          <p>状态: {{ registrationStatus }}</p>
+          <p>已成功捕获: {{ capturedFramesCount }} 帧</p>
+        </div>
+        <div class="registration-controls">
+          <button @click="captureFrame" class="capture-button">捕获当前帧</button>
+          <button @click="closeRegistrationModal" class="finish-button">完成注册</button>
+        </div>
+      </div>
+    </div>
+
     <div class="main-content">
       <!-- 引入复用的侧边栏组件 -->
       <Sidebar :currentPath="currentPath" />
@@ -165,14 +183,34 @@
 
 <script setup>
 import { useRoute } from 'vue-router'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue' // 引入 nextTick
+import io from 'socket.io-client'; // 引入 socket.io-client
+
 // 导入侧边栏组件
 import Sidebar from '../components/Sidebar.vue'
 
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
 const API_BASE_URL = `${SERVER_ROOT_URL}/api`
+const DLIB_API_BASE_URL = `${API_BASE_URL}/dlib`; // 新的 Dlib API 基础路径
 const VIDEO_FEED_URL = `${API_BASE_URL}/video_feed`
+
+// --- 新增：注册模态框状态 ---
+const showRegistrationModal = ref(false);
+const registrationStatus = ref('');
+const registrationName = ref('');
+const capturedFramesCount = ref(0);
+const registrationVideoEl = ref(null); // video 元素的引用
+const registrationSocket = ref(null); // 注册用的 WebSocket 实例
+const localStream = ref(null); // 本地摄像头流
+const wasWebcamActive = ref(false); // 新增：记录注册前摄像头是否开启
+
+// --- 新增：停止媒体流的辅助函数 ---
+const stopStream = (stream) => {
+  if (stream && stream.getTracks) {
+    stream.getTracks().forEach(track => track.stop());
+  }
+};
 
 // 状态变量
 const videoSource = ref('') // 视频源URL
@@ -190,6 +228,22 @@ const pollingIntervalId = ref(null) // 用于轮询的定时器ID
 const videoTaskId = ref(''); // 保存当前视频处理任务的ID
 
 // --- API 调用封装 ---
+// 使用新的 DLIB_API_BASE_URL
+const dlibApiFetch = async (endpoint, options = {}) => {
+  try {
+    const response = await fetch(`${DLIB_API_BASE_URL}${endpoint}`, options);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(errorData.message || `服务器错误: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error(`Dlib API调用失败 ${endpoint}:`, error);
+    alert(`操作失败: ${error.message}`);
+    throw error;
+  }
+};
+
 const apiFetch = async (endpoint, options = {}) => {
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
@@ -201,7 +255,7 @@ const apiFetch = async (endpoint, options = {}) => {
   } catch (error) {
     console.error(`API调用失败 ${endpoint}:`, error);
     alert(`操作失败: ${error.message}`);
-    throw error; // 重新抛出错误以便调用者可以捕获
+    throw error;
   }
 };
 
@@ -270,73 +324,149 @@ const updateSettings = async () => {
   }
 };
 
-// --- 人脸管理 ---
+// --- 人脸管理 (已更新为 Dlib API) ---
 const loadRegisteredUsers = async () => {
   try {
-    const data = await apiFetch('/faces/');
+    const data = await dlibApiFetch('/faces'); // <--- 更新API地址
     registeredUsers.value = data.names;
   } catch (error) {
-    // apiFetch中已处理错误
-  }
-};
-
-const registerFace = () => {
-  const name = prompt("请输入要注册人员的姓名:");
-  if (name) {
-    // 触发隐藏的文件输入框
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/jpeg,image/jpg,image/png';
-    input.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        handleFaceUpload(file, name);
-      }
-    };
-    input.click();
-  }
-};
-
-const disconnectWebcam = async () => {
-  try {
-    await apiFetch('/stop_video_feed', { method: 'POST' });
-    videoSource.value = '';
-    activeSource.value = '';
-    stopAlertPolling(); // 停止轮询告警信息
-    console.log('Webcam disconnected.');
-  } catch (error) {
-    console.error('Failed to disconnect webcam:', error);
-    alert('关闭摄像头失败。');
-  }
-};
-
-const handleFaceUpload = async (file, name) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('name', name);
-
-  try {
-    const data = await apiFetch('/faces/register', {
-      method: 'POST',
-      body: formData,
-    });
-    alert(data.message);
-    loadRegisteredUsers(); // 成功后刷新列表
-  } catch (error) {
-    // apiFetch中已处理错误
+    // dlibApiFetch 中已处理错误
   }
 };
 
 const deleteFace = async (name) => {
   if (confirm(`确定要删除人员 '${name}' 吗?`)) {
     try {
-      const data = await apiFetch(`/faces/${name}`, { method: 'DELETE' });
+      const data = await dlibApiFetch(`/faces/${name}`, { method: 'DELETE' }); // <--- 更新API地址
       alert(data.message);
       loadRegisteredUsers(); // 成功后刷新列表
     } catch (error) {
-      // apiFetch中已处理错误
+      // dlibApiFetch 中已处理错误
+    }
   }
-}
+};
+
+// --- 新的交互式注册流程 ---
+const registerFace = () => {
+  const name = prompt("请输入要注册人员的姓名:");
+  if (name && name.trim()) {
+    // 检查主摄像头是否正在运行，如果是，则先停止它
+    if (activeSource.value === 'webcam') {
+      wasWebcamActive.value = true;
+      disconnectWebcam();
+    } else {
+      wasWebcamActive.value = false;
+    }
+
+    registrationName.value = name.trim();
+    showRegistrationModal.value = true;
+    capturedFramesCount.value = 0;
+    registrationStatus.value = '准备中...';
+    
+    // 使用 nextTick 并增加一个短暂延时，以确保摄像头已被释放
+    nextTick(() => {
+      setTimeout(() => {
+        startRegistrationCapture();
+      }, 500); // 500ms 延迟，确保后端摄像头完全释放
+    });
+  }
+};
+
+const startRegistrationCapture = async () => {
+    if (!registrationVideoEl.value) {
+        console.error("注册视频元素尚未准备好。");
+        registrationStatus.value = '错误：无法访问视频元素。';
+        return;
+    }
+
+    // 1. 获取本地摄像头权限
+    try {
+        localStream.value = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        registrationVideoEl.value.srcObject = localStream.value;
+    } catch(err) {
+        console.error("无法访问摄像头:", err);
+        registrationStatus.value = '错误：无法访问摄像头。';
+        alert('无法访问摄像头，请检查权限。');
+        closeRegistrationModal();
+        return;
+    }
+
+    // 2. 连接到 WebSocket
+    registrationSocket.value = io(`${SERVER_ROOT_URL}/dlib/register`);
+
+    registrationSocket.value.on('connect', () => {
+        console.log('已连接到注册 WebSocket');
+        registrationStatus.value = '连接成功，正在开始...';
+        // 发送开始指令
+        registrationSocket.value.emit('start_registration', { name: registrationName.value });
+    });
+
+    registrationSocket.value.on('status', (data) => {
+        console.log('注册状态:', data.message);
+        registrationStatus.value = data.message;
+    });
+
+    registrationSocket.value.on('capture_result', (data) => {
+        if (data.status === 'success') {
+            capturedFramesCount.value = data.count;
+            registrationStatus.value = `成功捕获 ${data.count} 帧`;
+        } else {
+            registrationStatus.value = `捕获失败: ${data.message}`;
+        }
+    });
+
+    registrationSocket.value.on('error', (data) => {
+        console.error('注册 WebSocket 错误:', data.message);
+        registrationStatus.value = `错误: ${data.message}`;
+    });
+
+    registrationSocket.value.on('disconnect', () => {
+        console.log('已从注册 WebSocket断开');
+        registrationStatus.value = '连接已断开。';
+    });
+};
+
+const captureFrame = () => {
+    if (!registrationVideoEl.value || !registrationSocket.value) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = registrationVideoEl.value.videoWidth;
+    canvas.height = registrationVideoEl.value.videoHeight;
+    const context = canvas.getContext('2d');
+    context.drawImage(registrationVideoEl.value, 0, 0, canvas.width, canvas.height);
+    
+    // 将帧数据转为 base64
+    const imageData = canvas.toDataURL('image/jpeg');
+    
+    // 通过 WebSocket 发送
+    registrationSocket.value.emit('frame_for_capture', { image: imageData });
+    registrationStatus.value = '已发送捕获请求...';
+};
+
+// 在关闭模态框时停止视频流
+const closeRegistrationModal = (isUnmounting = false) => {
+  showRegistrationModal.value = false;
+  registrationName.value = '';
+  registrationStatus.value = '';
+  capturedFramesCount.value = 0;
+
+  // 停止摄像头
+  if (localStream.value && localStream.value.getTracks) {
+    localStream.value.getTracks().forEach(track => track.stop());
+    localStream.value = null;
+  }
+  
+  // 断开 socket 连接
+  if (registrationSocket.value) {
+    registrationSocket.value.disconnect();
+    registrationSocket.value = null;
+  }
+
+  // 如果不是在组件卸载时调用，并且之前摄像头是开启的，则重新连接
+  if (!isUnmounting && wasWebcamActive.value) {
+    connectWebcam();
+    wasWebcamActive.value = false;
+  }
 };
 
 
@@ -347,6 +477,23 @@ const connectWebcam = () => {
   videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
   activeSource.value = 'webcam';
   startAlertPolling();
+};
+
+const disconnectWebcam = async () => {
+  if (activeSource.value !== 'webcam') return;
+
+  try {
+    // 向后端发送停止指令
+    await fetch(`${API_BASE_URL}/stop_video_feed`, { method: 'POST' });
+    console.log("已向后端发送停止摄像头指令。");
+  } catch (error) {
+    console.error("发送停止指令失败:", error);
+  } finally {
+    // 无论如何都更新前端UI
+    activeSource.value = '';
+    videoSource.value = '';
+    stopAlertPolling(); // 停止轮询警报
+  }
 };
 
 const uploadVideoFile = () => {
@@ -578,11 +725,15 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (alertPollingInterval) {
-    clearInterval(alertPollingInterval)
+  // 清除定时器
+  if (pollingIntervalId.value) {
+    clearInterval(pollingIntervalId.value)
   }
-  stopPolling(); // 组件卸载时确保停止轮询
-})
+  
+  // 停止所有正在运行的视频流
+  disconnectWebcam(); // 这个函数现在会处理摄像头关闭
+  closeRegistrationModal(true); // 组件卸载时确保清理, 并告知函数不要重启摄像头
+});
 </script>
 
 <style scoped>
@@ -932,5 +1083,90 @@ onUnmounted(() => {
     flex-basis: 100%;
     margin-bottom: 0.5rem;
   }
+}
+
+/* 新增：注册模态框样式 */
+.registration-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.registration-modal-content {
+  background-color: #2c2c2c;
+  padding: 30px;
+  border-radius: 10px;
+  border: 1px solid #444;
+  color: #fff;
+  width: 800px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.registration-modal-content h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.8em;
+  color: #4CAF50; /* 主题绿色 */
+}
+
+.registration-video-container {
+  width: 100%;
+  margin-bottom: 20px;
+  background-color: #000;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.registration-video {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.registration-status {
+  margin-bottom: 20px;
+  font-size: 1.1em;
+  background-color: #333;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.registration-controls {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.registration-controls button {
+  padding: 12px 25px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1.1em;
+  transition: background-color 0.3s ease;
+}
+
+.capture-button {
+  background-color: #007bff;
+  color: white;
+}
+.capture-button:hover {
+  background-color: #0056b3;
+}
+
+.finish-button {
+  background-color: #4CAF50;
+  color: white;
+}
+.finish-button:hover {
+  background-color: #45a049;
 }
 </style>
