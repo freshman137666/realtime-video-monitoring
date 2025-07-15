@@ -41,9 +41,11 @@ def create_app():
     from app.routes.auth import auth_bp 
     from app.routes.dlib_routes import dlib_bp # 导入新的 Dlib 蓝图
     # 在蓝图导入部分添加
-    from app.routes.main import main_bp  # 添加这行
-
+    from app.routes.rtmp_routes import rtmp_bp  # 添加这行
+    from app.routes.main import main_bp  # 添加这行导入 main_bp
+    
     # 在蓝图注册部分添加
+    app.register_blueprint(rtmp_bp)  # 添加这行
     app.register_blueprint(main_bp)  # 添加这行
 
     app.register_blueprint(api_bp)
