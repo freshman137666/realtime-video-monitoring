@@ -130,21 +130,6 @@
         </div>
       </div>
       
-      <div class="control-panel">
-        <h2>控制面板</h2>
-        
-        <!-- 视频源选择 -->
-
-                <div v-else-if="activeSource === 'loading'" class="loading-state">
-                  <p>正在处理文件，请稍候...</p>
-                  <div class="loading-spinner"></div>
-                </div>
-                <div v-else class="video-placeholder">
-                  <p>加载中或未连接视频源</p>
-                </div>
-              </div>
-            </div>
-            
             <div class="control-panel">
               <h2>控制面板</h2>
               
