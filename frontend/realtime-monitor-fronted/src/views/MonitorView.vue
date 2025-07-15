@@ -262,6 +262,9 @@ import io from 'socket.io-client'; // 引入 socket.io-client
 // 导入侧边栏组件
 import Sidebar from '../components/Sidebar.vue'
 
+// 当前路径状态
+const currentPath = ref('')
+
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
 const API_BASE_URL = `${SERVER_ROOT_URL}/api`
