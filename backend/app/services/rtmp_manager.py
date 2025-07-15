@@ -109,6 +109,9 @@ class RTMPStreamManager:
             print(f"❌ RTMP流连接失败: {e}")
             raise Exception(f"RTMP流连接失败: {str(e)}")
         
+        # 设置VideoCapture的属性以减少延迟
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+        
         self.active_captures[stream_id] = cap
         self.frame_queues[stream_id] = queue.Queue(maxsize=10)
         self.stop_events[stream_id] = threading.Event()
