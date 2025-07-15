@@ -1,124 +1,245 @@
 <template>
-  <div class="app-container">
-    <!-- 顶部导航栏 -->
-    <header class="top-bar">
-      <div class="header-left">
-        <h1>车站实时视频监控系统</h1>
-      </div>
-      <div class="header-right">
-        <div class="profile-info">
-          <div class="avatar">
-            <img src="https://via.placeholder.com/100" alt="用户头像">
-          </div>
-          <div class="name-role">
-            <h2>张三</h2>
-            <p>管理员</p>
-          </div>
+  <div class="monitor-page">
+    <!-- 引入顶部栏组件 -->
+    <TopBar />
+    
+    <!-- 页面标题区域 -->
+    <div class="page-title">
+      <div class="title-content">
+        <div class="title-icon">
+          <Camera class="w-8 h-8" />
+        </div>
+        <div class="title-text">
+          <h1>入站人脸监控</h1>
         </div>
       </div>
-    </header>
-
-    <div class="main-content">
-      <!-- 引入复用的侧边栏组件 -->
-      <Sidebar :currentPath="currentPath" />
-
-      <!-- 主内容区域 - 入站人脸监控内容 -->
-      <main class="content-area">
-        <div class="monitor-page">
-          <h1>入站人脸监控</h1>
-          
-          <div class="monitor-container">
-            <div class="video-container">
-              <h2>监控视图</h2>
-              <div class="video-wrapper">
-                <!-- Case 1: Webcam is active -->
-                <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
-                
-                <!-- Case 2: An upload is active, so we check its type -->
-                <template v-else-if="activeSource === 'upload'">
-                    <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
-                    <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
-                </template>
-
-                <!-- Case 3: Loading -->
-                <div v-else-if="activeSource === 'loading'" class="loading-state">
-                  <p>正在处理文件，请稍候...</p>
-                  <div class="loading-spinner"></div>
-                </div>
-                
-                <!-- Case 4: Default placeholder -->
-                <div v-else class="video-placeholder">
-                  <p>加载中或未连接视频源</p>
+    </div>
+    
+    <!-- 视频区域 -->
+    <div class="video-container" :class="{ 'sidebar-visible': isSidebarOpen }">
+      <div class="video-wrapper">
+        <div class="video-content">
+          <transition name="video-fade" mode="out-in">
+            <div v-if="activeSource === 'webcam'" key="webcam" class="video-frame">
+              <img :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
+              <div class="video-overlay">
+                <div class="recording-indicator">
+                  <div class="recording-dot"></div>
+                  <span>实时监控</span>
                 </div>
               </div>
             </div>
             
-            <div class="control-panel">
-              <h2>控制面板</h2>
-              
-              <!-- 视频源选择 -->
-              <div class="control-section">
-                <h3>视频源</h3>
-                <div class="button-group">
-                  <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
-                  <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
-                  <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
-                </div>
-                <input 
-                  type="file" 
-                  ref="fileInput"
-                  accept="video/mp4,image/jpeg,image/jpg"
-                  style="display:none"
-                  @change="handleFileUpload"
-                />
-              </div>
-              
-              <!-- 告警信息 -->
-              <div class="control-section">
-                <h3>告警信息</h3>
-                <div class="alerts-container" :class="{ 'has-alerts': alerts.length > 0 }">
-                  <div v-if="alerts.length > 0" class="alert-list">
-                    <div v-for="(alert, index) in alerts" :key="index" class="alert-item">
-                      {{ alert }}
-                    </div>
-                  </div>
-                  <p v-else>当前无告警信息</p>
-                </div>
-              </div>
-
-              <!-- 人员管理 -->
-              <div class="control-section">
-                <h3>人员管理</h3>
-                <div class="button-group">
-                  <button @click="registerFace" class="apply-button">添加人员</button>
-                </div>
-                <div class="user-list-container">
-                  <ul v-if="registeredUsers.length > 0">
-                    <li v-for="user in registeredUsers" :key="user">
-                      <span>{{ user }}</span>
-                      <button @click="deleteFace(user)" class="delete-button">删除</button>
-                    </li>
-                  </ul>
-                  <p v-else>未注册任何人员</p>
+            <div v-else-if="activeSource === 'upload'" key="upload" class="video-frame">
+              <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
+              <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+              <div class="video-overlay">
+                <div class="file-info">
+                  <FileImage class="w-4 h-4" />
+                  <span>已上传文件</span>
                 </div>
               </div>
             </div>
+            
+            <div v-else-if="activeSource === 'loading'" key="loading" class="loading-state">
+              <div class="loading-content">
+                <div class="loading-spinner">
+                  <Loader2 class="w-8 h-8 animate-spin" />
+                </div>
+                <p>正在处理文件，请稍候...</p>
+                <div class="loading-progress">
+                  <div class="progress-bar"></div>
+                </div>
+              </div>
+            </div>
+            
+            <div v-else key="placeholder" class="video-placeholder">
+              <div class="placeholder-content">
+                <MonitorSpeaker class="w-16 h-16 text-gray-400" />
+                <h3>选择视频源</h3>
+                <p>请选择摄像头或上传文件开始监控</p>
+              </div>
+            </div>
+          </transition>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 可滑动侧边栏控制面板 -->
+    <aside 
+      class="control-sidebar"
+      :class="{ 'sidebar-open': isSidebarOpen }"
+    >
+      <div class="sidebar-header">
+        <div class="header-content">
+          <Settings class="w-5 h-5" />
+          <h2>控制面板</h2>
+        </div>
+        <div class="header-actions">
+          <button @click="toggleSidebar" class="close-btn">
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      
+      <div class="sidebar-content">
+        <!-- 视频源控制 -->
+        <div class="control-section">
+          <div class="section-header">
+            <PlayCircle class="w-4 h-4" />
+            <h3>视频源控制</h3>
+          </div>
+          <div class="button-group">
+            <button 
+              @click="connectWebcam" 
+              :class="{ active: activeSource === 'webcam' }"
+              class="control-btn"
+            >
+              <Video class="w-4 h-4" />
+              <span>摄像头</span>
+            </button>
+            <button 
+              @click="uploadVideoFile" 
+              :disabled="activeSource === 'webcam'"
+              class="control-btn"
+            >
+              <Upload class="w-4 h-4" />
+              <span>上传文件</span>
+            </button>
           </div>
         </div>
-      </main>
+        
+        <!-- 告警信息 -->
+        <div class="control-section">
+          <div class="section-header">
+            <AlertTriangle class="w-4 h-4" />
+            <h3>告警信息</h3>
+            <div v-if="newAlertCount > 0" class="alert-badge">
+              {{ newAlertCount }}
+            </div>
+          </div>
+          <div class="alerts-container" :class="{ 'has-alerts': alerts.length > 0 }">
+            <transition-group name="alert-list" tag="div" class="alert-list">
+              <div
+                v-for="(alert, index) in alerts"
+                :key="`alert-${index}-${alert.timestamp}`"
+                class="alert-item"
+                :class="{ 'alert-new': alert.isNew }"
+                @click="markAsRead(alert, index)"
+              >
+                <div class="alert-header">
+                  <AlertCircle class="w-3 h-3" />
+                  <span class="alert-time">{{ formatTime(alert.timestamp) }}</span>
+                </div>
+                <p class="alert-message">{{ alert.message }}</p>
+              </div>
+            </transition-group>
+            <div v-if="alerts.length === 0" class="empty-state">
+              <Shield class="w-8 h-8 text-gray-400" />
+              <p>当前无告警信息</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 人员管理 -->
+        <div class="control-section">
+          <div class="section-header">
+            <Users class="w-4 h-4" />
+            <h3>人员管理</h3>
+            <div class="user-count">{{ registeredUsers.length }}</div>
+          </div>
+          <button @click="registerFace" class="add-user-btn">
+            <UserPlus class="w-4 h-4" />
+            <span>添加人员</span>
+          </button>
+          <div class="user-list-container">
+            <transition-group name="user-list" tag="ul" class="user-list">
+              <li 
+                v-for="user in registeredUsers" 
+                :key="user"
+                class="user-item"
+              >
+                <div class="user-info">
+                  <User class="w-4 h-4" />
+                  <span>{{ user }}</span>
+                </div>
+                <button @click="deleteFace(user)" class="delete-btn">
+                  <Trash2 class="w-4 h-4" />
+                </button>
+              </li>
+            </transition-group>
+            <div v-if="registeredUsers.length === 0" class="empty-state">
+              <UserX class="w-8 h-8 text-gray-400" />
+              <p>未注册任何人员</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+    
+    <!-- 可拖动悬浮按钮 -->
+    <div 
+      class="floating-control"
+      :style="floatingButtonStyle"
+      @mousedown="startDrag"
+      @touchstart="startDrag"
+    >
+      <button
+        class="sidebar-toggle-btn"
+        @click.stop="toggleSidebar"
+        :class="{ 'sidebar-open': isSidebarOpen }"
+      >
+        <transition name="icon-rotate" mode="out-in">
+          <ChevronLeft v-if="isSidebarOpen" key="close" class="w-5 h-5" />
+          <Settings v-else key="open" class="w-5 h-5" />
+        </transition>
+      </button>
     </div>
+    
+    <!-- 告警通知 -->
+    <transition name="notification">
+      <div v-if="showNotification" class="alert-notification">
+        <div class="notification-content">
+          <AlertTriangle class="w-5 h-5 text-orange-500" />
+          <div class="notification-text">
+            <p class="notification-title">新告警</p>
+            <p class="notification-message">{{ latestAlert }}</p>
+          </div>
+        </div>
+        <button @click="hideNotification" class="notification-close">
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
 import { useRoute } from 'vue-router'
-import { ref, onMounted, onUnmounted } from 'vue'
-// 导入侧边栏组件
-import Sidebar from '../components/Sidebar.vue'
+import { ref, onMounted, onUnmounted, computed, reactive } from 'vue'
+import TopBar from '../components/TopBar.vue'
 
-// 获取当前路由路径
+// 导入图标
+import { 
+  Camera, Video, Upload, Square, Settings, ChevronLeft, X, 
+  PlayCircle, AlertTriangle, AlertCircle, Shield, Users, 
+  UserPlus, User, UserX, Trash2, FileImage, MonitorSpeaker,
+  Loader2
+} from 'lucide-vue-next'
+
+// 路由和状态变量
 const route = useRoute()
-const currentPath = route.path
+const windowWidth = ref(window.innerWidth)
+const isSidebarOpen = ref(windowWidth.value >= 992)
+
+// 悬浮按钮相关
+const floatingButton = reactive({
+  x: 24,
+  y: 120,
+  isDragging: false,
+  offsetX: 0,
+  offsetY: 0
+})
 
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
@@ -126,17 +247,49 @@ const API_BASE_URL = `${SERVER_ROOT_URL}/api`
 const VIDEO_FEED_URL = `${API_BASE_URL}/video_feed`
 
 // 状态变量
-const videoSource = ref('') // 视频源URL
-const activeSource = ref('') // 'webcam', 'upload', 'loading'
-const detectionMode = ref('face_only'); // 始终为face_only模式
+const videoSource = ref('')
+const activeSource = ref('')
 const alerts = ref([])
-const fileInput = ref(null) // 文件输入引用
-const registeredUsers = ref([]) // 已注册用户列表
-const pollingIntervalId = ref(null) // 用于轮询的定时器ID
-const videoTaskId = ref('') // 保存当前视频处理任务的ID
+const registeredUsers = ref([])
+const pollingIntervalId = ref(null)
+const videoTaskId = ref('')
+const newAlertCount = ref(0)
 
+// 通知相关
+const showNotification = ref(false)
+const latestAlert = ref('')
 
-// --- API 调用封装 ---
+// 计算属性
+const statusIndicatorClass = computed(() => ({
+  active: activeSource.value === 'webcam'
+}))
+
+const statusText = computed(() => {
+  return activeSource.value === 'webcam' ? '实时监控中' : '监控已停止'
+})
+
+const floatingButtonStyle = computed(() => ({
+  left: `${floatingButton.x}px`,
+  top: `${floatingButton.y}px`,
+  cursor: floatingButton.isDragging ? 'grabbing' : 'grab'
+}))
+
+// 格式化时间
+const formatTime = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  return date.toLocaleTimeString()
+}
+
+// 标记告警为已读
+const markAsRead = (alert, index) => {
+  if (alert.isNew) {
+    alerts.value[index].isNew = false
+    newAlertCount.value--
+  }
+}
+
+// API调用封装
 const apiFetch = async (endpoint, options = {}) => {
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
@@ -148,24 +301,21 @@ const apiFetch = async (endpoint, options = {}) => {
   } catch (error) {
     console.error(`API调用失败 ${endpoint}:`, error);
     alert(`操作失败: ${error.message}`);
-    throw error; // 重新抛出错误以便调用者可以捕获
+    throw error;
   }
 };
 
-// --- 人脸管理 ---
+// 人脸管理方法
 const loadRegisteredUsers = async () => {
   try {
     const data = await apiFetch('/faces/');
     registeredUsers.value = data.names;
-  } catch (error) {
-    // apiFetch中已处理错误
-  }
+  } catch (error) {}
 };
 
 const registerFace = () => {
   const name = prompt("请输入要注册人员的姓名:");
   if (name) {
-    // 触发隐藏的文件输入框
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/jpeg,image/jpg,image/png';
@@ -183,17 +333,14 @@ const handleFaceUpload = async (file, name) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('name', name);
-
   try {
     const data = await apiFetch('/faces/register', {
       method: 'POST',
       body: formData,
     });
     alert(data.message);
-    loadRegisteredUsers(); // 成功后刷新列表
-  } catch (error) {
-    // apiFetch中已处理错误
-  }
+    loadRegisteredUsers();
+  } catch (error) {}
 };
 
 const deleteFace = async (name) => {
@@ -201,17 +348,14 @@ const deleteFace = async (name) => {
     try {
       const data = await apiFetch(`/faces/${name}`, { method: 'DELETE' });
       alert(data.message);
-      loadRegisteredUsers(); // 成功后刷新列表
-    } catch (error) {
-      // apiFetch中已处理错误
-    }
+      loadRegisteredUsers();
+    } catch (error) {}
   }
 };
 
-// --- 视频/图像处理 ---
+// 视频控制方法
 const connectWebcam = () => {
-  stopPolling(); // 如果有正在轮询的任务，先停止
-  // 添加时间戳来防止浏览器缓存
+  stopPolling();
   videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
   activeSource.value = 'webcam';
   startAlertPolling();
@@ -222,16 +366,14 @@ const disconnectWebcam = async () => {
     await apiFetch('/stop_video_feed', { method: 'POST' });
     videoSource.value = '';
     activeSource.value = '';
-    stopAlertPolling(); // 停止轮询告警信息
-    console.log('Webcam disconnected.');
+    stopAlertPolling();
   } catch (error) {
-    console.error('Failed to disconnect webcam:', error);
+    console.error('关闭摄像头失败:', error);
     alert('关闭摄像头失败。');
   }
 };
 
 const uploadVideoFile = () => {
-  // 动态创建input元素，这是一个更可靠的方法
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'video/mp4,image/jpeg,image/jpg';
@@ -242,48 +384,51 @@ const uploadVideoFile = () => {
 const handleFileUpload = async (event) => {
   const file = event.target.files[0];
   if (!file) return;
-
-  stopPolling(); // 开始新的上传前，停止任何已有的轮询
+  
+  stopPolling();
   videoSource.value = '';
   activeSource.value = 'loading';
-
+  
   const formData = new FormData();
   formData.append('file', file);
-
+  
   try {
     const response = await fetch(`${API_BASE_URL}/upload`, {
       method: 'POST',
       body: formData
     });
-
+    
     if (response.status === 202) {
-      // 异步处理视频
       const data = await response.json();
       videoTaskId.value = data.task_id;
       startPolling(data.task_id);
     } else if (response.ok) {
-      // 同步处理图片
       const data = await response.json();
       videoSource.value = `${SERVER_ROOT_URL}${data.file_url}?t=${new Date().getTime()}`;
       activeSource.value = 'upload';
-      alerts.value = data.alerts || [];
-      stopAlertPolling(); // 处理完成后停止轮询
+      
+      alerts.value = (data.alerts || []).map(alert => ({
+        message: alert,
+        timestamp: new Date(),
+        isNew: true
+      }));
+      newAlertCount.value = alerts.value.length;
+      stopAlertPolling();
     } else {
-      // 处理其他HTTP错误
       const errorData = await response.json();
       throw new Error(errorData.message || '文件上传失败');
     }
   } catch (error) {
     activeSource.value = '';
-    alert(error.message || '操作失败: Failed to fetch');
-    console.error('File upload error:', error);
+    alert(error.message || '操作失败');
   }
 };
 
+// 轮询相关方法
 const startPolling = (taskId) => {
   pollingIntervalId.value = setInterval(() => {
     pollTaskStatus(taskId);
-  }, 2000); // 每2秒轮询一次
+  }, 2000);
 };
 
 const stopPolling = () => {
@@ -297,380 +442,1092 @@ const stopPolling = () => {
 const pollTaskStatus = async (taskId) => {
   try {
     const response = await fetch(`${API_BASE_URL}/video/task_status/${taskId}`);
-
-    if (response.status === 200) {
-      // 任务完成
-      stopPolling();
-      const data = await response.json();
-      videoSource.value = `${SERVER_ROOT_URL}${data.file_url}?t=${new Date().getTime()}`;
-      activeSource.value = 'upload';
-      alerts.value = data.alerts || [];
-    } else if (response.status === 202) {
-      // 任务仍在进行中
-      console.log('Video processing...');
-    } else {
-      // 任务失败或出现其他错误
-      stopPolling();
-      const errorData = await response.json();
-      throw new Error(errorData.message || '视频处理失败');
-    }
-  } catch (error) {
-    stopPolling();
-    activeSource.value = '';
-    alert(error.message);
-    console.error('Polling error:', error);
-  }
-};
-
-// 判断URL是否为图像
-const isImageUrl = (url) => {
-  const lowerUrl = url.toLowerCase();
-  return lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg')
-}
-
-// 判断URL是否为视频
-const isVideoUrl = (url) => {
-  return url.toLowerCase().includes('.mp4')
-}
-
-// 定期轮询告警信息
-let alertPollingInterval = null
-
-const startAlertPolling = () => {
-  // 先清除之前的轮询
-  if (alertPollingInterval) {
-    clearInterval(alertPollingInterval)
-  }
-  
-  // 开始新的轮询
-  alertPollingInterval = setInterval(async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/alerts`)
-      const data = await response.json()
-      alerts.value = data.alerts || []
+          if (response.status === 200) {
+        stopPolling();
+        const data = await response.json();
+        videoSource.value = `${SERVER_ROOT_URL}${data.file_url}`;
+        activeSource.value = 'upload';
+        alerts.value = (data.alerts || []).map(alert => ({
+          message: alert,
+          timestamp: new Date(),
+          isNew: true
+        }));
+        newAlertCount.value = alerts.value.length;
+      } else if (response.status === 202) {
+        console.log('视频处理中...');
+      } else {
+        stopPolling();
+        const errorData = await response.json();
+        throw new Error(errorData.message || '视频处理失败');
+      }
     } catch (error) {
-      console.error('Error fetching alerts:', error)
-      // 如果获取告警失败（例如服务器重启），则停止轮询
-      stopAlertPolling();
+      stopPolling();
+      activeSource.value = '';
+      alert(error.message);
     }
-  }, 2000) // 轮询频率为2秒
-}
-
-const stopAlertPolling = () => {
-  if (alertPollingInterval) {
-    clearInterval(alertPollingInterval);
-    alertPollingInterval = null;
-  }
-}
-// 新增：强制设置后端检测模式为face_only（参考示例页面的setDetectionMode）
-const forceFaceOnlyMode = async () => {
-  try {
-    // 调用与示例页面相同的模式切换API
-    await apiFetch('/detection_mode', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'face_only' })
-    });
-    console.log('已强制设置为纯人脸识别模式');
-  } catch (error) {
-    console.error('设置人脸识别模式失败:', error);
-  }
-};
-
-// 修改生命周期钩子，添加模式强制设置
-onMounted(() => {
-  loadRegisteredUsers();
-  forceFaceOnlyMode(); // 页面加载时执行，确保后端模式正确
-});
-
-onUnmounted(() => {
-  if (alertPollingInterval) {
-    clearInterval(alertPollingInterval)
-  }
-  stopPolling(); // 组件卸载时确保停止轮询
-})
+  };
+  
+  // 告警轮询
+  let alertPollingInterval = null;
+  
+  const startAlertPolling = () => {
+    if (alertPollingInterval) clearInterval(alertPollingInterval);
+    
+    alertPollingInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/alerts`);
+        const data = await response.json();
+        
+        if (data.alerts && data.alerts.length) {
+          const newAlerts = data.alerts
+            .filter(alert => !alerts.value.some(a => a.message === alert))
+            .map(alert => ({
+              message: alert,
+              timestamp: new Date(),
+              isNew: true
+            }));
+          
+          if (newAlerts.length) {
+            alerts.value = [...alerts.value, ...newAlerts];
+            newAlertCount.value += newAlerts.length;
+            
+            // 显示通知
+            if (windowWidth.value < 768 && !isSidebarOpen.value) {
+              showAlertNotification(newAlerts[0].message);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('获取告警失败:', error);
+        stopAlertPolling();
+      }
+    }, 2000);
+  };
+  
+  const stopAlertPolling = () => {
+    if (alertPollingInterval) {
+      clearInterval(alertPollingInterval);
+      alertPollingInterval = null;
+    }
+  };
+  
+  // 通知相关方法
+  const showAlertNotification = (message) => {
+    latestAlert.value = message;
+    showNotification.value = true;
+    
+    setTimeout(() => {
+      hideNotification();
+    }, 5000);
+  };
+  
+  const hideNotification = () => {
+    showNotification.value = false;
+  };
+  
+  // 模式设置
+  const forceFaceOnlyMode = async () => {
+    try {
+      await apiFetch('/detection_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'face_only' })
+      });
+    } catch (error) {
+      console.error('设置人脸识别模式失败:', error);
+    }
+  };
+  
+  // 侧边栏控制
+  const toggleSidebar = () => {
+    isSidebarOpen.value = !isSidebarOpen.value;
+  };
+  
+  // 悬浮按钮拖动控制
+  const startDrag = (e) => {
+    e.preventDefault();
+    
+    const touchEvent = e.touches?.[0] || e;
+    const rect = e.currentTarget.getBoundingClientRect();
+    
+    floatingButton.isDragging = true;
+    floatingButton.offsetX = touchEvent.clientX - rect.left;
+    floatingButton.offsetY = touchEvent.clientY - rect.top;
+    
+    document.addEventListener('mousemove', handleDrag);
+    document.addEventListener('mouseup', stopDrag);
+    document.addEventListener('touchmove', handleDrag, { passive: false });
+    document.addEventListener('touchend', stopDrag);
+  };
+  
+  const handleDrag = (e) => {
+    if (!floatingButton.isDragging) return;
+    
+    const touchEvent = e.touches?.[0] || e;
+    
+    // 计算新位置，确保按钮不会移出可视区域
+    let newX = touchEvent.clientX - floatingButton.offsetX;
+    let newY = touchEvent.clientY - floatingButton.offsetY;
+    
+    // 边界检查
+    const buttonWidth = 48; // 按钮宽度
+    const buttonHeight = 48; // 按钮高度
+    const maxX = window.innerWidth - buttonWidth;
+    const maxY = window.innerHeight - buttonHeight;
+    
+    newX = Math.max(0, Math.min(newX, maxX));
+    newY = Math.max(0, Math.min(newY, maxY));
+    
+    floatingButton.x = newX;
+    floatingButton.y = newY;
+  };
+  
+  const stopDrag = () => {
+    floatingButton.isDragging = false;
+    document.removeEventListener('mousemove', handleDrag);
+    document.removeEventListener('mouseup', stopDrag);
+    document.removeEventListener('touchmove', handleDrag);
+    document.removeEventListener('touchend', stopDrag);
+  };
+  
+  // 窗口大小响应
+  const handleResize = () => {
+    const newWidth = window.innerWidth;
+    windowWidth.value = newWidth;
+    
+    if (newWidth >= 992 && !isSidebarOpen.value) {
+      isSidebarOpen.value = true;
+    }
+  };
+  
+  // 生命周期
+  onMounted(() => {
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    
+    loadRegisteredUsers();
+    forceFaceOnlyMode();
+  });
+  
+  onUnmounted(() => {
+    window.removeEventListener('resize', handleResize);
+    if (alertPollingInterval) clearInterval(alertPollingInterval);
+    stopPolling();
+    document.removeEventListener('mousemove', handleDrag);
+    document.removeEventListener('mouseup', stopDrag);
+    document.removeEventListener('touchmove', handleDrag);
+    document.removeEventListener('touchend', stopDrag);
+  });
+  
+  // 辅助方法
+  const isImageUrl = (url) => {
+    const lowerUrl = url.toLowerCase();
+    return lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg') || lowerUrl.includes('.png');
+  };
+  
+  const isVideoUrl = (url) => {
+    return url.toLowerCase().includes('.mp4') || url.toLowerCase().includes('.webm');
+  };
 </script>
 
 <style scoped>
-/* 复用的布局样式 */
-.app-container {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  background-color: #121212;
-  color: #e0e0e0;
+/* 全局样式重置与基础设置 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
 }
 
-/* 顶部导航栏样式 */
-.top-bar {
+/* 页面标题样式 */
+.page-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 20px;
-  height: 60px;
-  background-color: #1e1e1e;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  position: sticky;
-  top: 0;
-  z-index: 100;
+  padding: 24px 32px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
-.header-left h1 {
+.title-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.title-icon {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.page-title h1 {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #e0e0e0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
 }
 
-.header-right {
+.title-actions {
+  display: flex;
+  gap: 16px;
+}
+
+.status-indicator {
   display: flex;
   align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
 }
 
-.profile-info {
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.active .status-dot {
+  background: #22c55e;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* 视频容器样式 */
+.video-container {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 320px);
+  padding: 24px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* 侧边栏打开时调整视频区域 */
+.video-container.sidebar-visible {
+  width: calc(100% - 400px);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 1200px) {
+  .video-container.sidebar-visible {
+    width: calc(100% - 360px);
+  }
+}
+
+@media (max-width: 992px) {
+  .video-container.sidebar-visible {
+    width: calc(100% - 340px);
+  }
+}
+
+@media (max-width: 768px) {
+  .video-container.sidebar-visible {
+    width: 100%;
+  }
+}
+
+.video-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.video-content {
+  flex: 1;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-frame {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.webcam-feed,
+.video-frame img,
+.video-frame video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.video-overlay {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+}
+
+.recording-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: white;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(34, 197, 94, 0.9);
+  color: white;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+}
+
+/* 加载状态 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #6b7280;
+  gap: 20px;
+}
+
+.loading-content {
+  text-align: center;
+}
+
+.loading-spinner {
+  margin-bottom: 16px;
+  color: #667eea;
+}
+
+.loading-progress {
+  width: 200px;
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  animation: progress 2s ease-in-out infinite;
+}
+
+@keyframes progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* 占位符状态 */
+.video-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+.placeholder-content {
+  text-align: center;
+  color: #64748b;
+}
+
+.placeholder-content h3 {
+  margin: 16px 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.placeholder-content p {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+/* 视频淡入淡出动画 */
+.video-fade-enter-active,
+.video-fade-leave-active {
+  transition: all 0.5s ease;
+}
+
+.video-fade-enter-from,
+.video-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+/* 快捷操作按钮 */
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 14px;
+  position: relative;
+  overflow: hidden;
+}
+
+.action-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.action-btn:hover::before {
+  left: 100%;
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.action-btn:active {
+  transform: translateY(0);
+}
+
+.action-btn.primary {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+}
+
+.action-btn.secondary {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+}
+
+.action-btn.danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+}
+
+.action-btn.active {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 4px 15px rgba(59, 130, 246, 0.4);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* 侧边栏样式 */
+.control-sidebar {
+  position: fixed;
+  top: 60px;
+  right: 0;
+  height: calc(100vh - 60px);
+  width: 400px;
+  background: white;
+  box-shadow: -4px 0 30px rgba(0, 0, 0, 0.1);
+  transform: translateX(100%);
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 70;
+  overflow: hidden;
+  border-left: 1px solid #e5e7eb;
+}
+
+.control-sidebar.sidebar-open {
+  transform: translateX(0);
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.header-content {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-}
-
-.avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.name-role h2 {
+.header-content h2 {
   margin: 0;
-  font-size: 16px;
-  color: #e0e0e0;
+  color: #1f2937;
+  font-size: 20px;
+  font-weight: 600;
 }
 
-.name-role p {
-  margin: 0;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+.close-btn {
+  padding: 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.2s ease;
 }
 
-/* 主内容区域样式 */
-.main-content {
-  display: flex;
-  flex: 1;
-  height: calc(100vh - 60px);
+.close-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
 }
 
-/* 内容区域样式 */
-.content-area {
-  flex: 1;
-  padding: 20px;
+.sidebar-content {
+  height: calc(100% - 80px);
   overflow-y: auto;
-  background-color: #121212;
+  padding: 24px;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db #f9fafb;
 }
 
-/* 入站人脸页面特有样式 */
-.monitor-page {
-  width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 20px;
-  color: #fff;
-  background-color: #1a1a1a;
-  border-radius: 8px;
+.sidebar-content::-webkit-scrollbar {
+  width: 6px;
 }
 
-.monitor-page h1 {
-  text-align: center;
-  margin-bottom: 2rem;
-  color: #e0e0e0;
+.sidebar-content::-webkit-scrollbar-track {
+  background: #f9fafb;
 }
-.monitor-container {
-  display: flex;
-  gap: 2rem;
-  flex-wrap: wrap;
+
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
 }
-.video-container, .control-panel {
-  flex: 1;
-  min-width: 300px;
-  border-radius: 8px;
-  padding: 1.5rem;
-  background-color: #2d2d2d;
+
+/* 控制面板区域 */
+.control-section {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #f3f4f6;
 }
-.video-container h2, .control-panel h2 {
-  margin-top: 0;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid #444;
-  padding-bottom: 0.5rem;
-  color: #e0e0e0;
+
+.control-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
-.video-wrapper {
-  width: 100%;
-  height: 480px;
-  background-color: #000;
-  border: 1px solid #444;
-  border-radius: 4px;
-  overflow: hidden;
+
+.section-header {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  margin-bottom: 16px;
   position: relative;
 }
 
-.webcam-feed {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+.section-header h3 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
 }
 
-.video-wrapper img, .video-wrapper video {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-.video-placeholder, .loading-state {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  color: #888;
-}
-
-.loading-spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-  margin-top: 1rem;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.control-section {
-  margin-bottom: 2rem;
-}
-.control-section h3 {
-  margin-bottom: 1rem;
-  color: #ccc;
-}
-/* 控制面板按钮组样式 */
-.control-panel .button-group {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-.control-panel .button-group button, .apply-button {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  background-color: #4CAF50;
+.alert-badge,
+.user-count {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   color: white;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 10px;
+  min-width: 20px;
+  text-align: center;
+}
+
+.user-count {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.button-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  background: white;
+  color: #6b7280;
   cursor: pointer;
-  transition: background-color 0.3s;
-}
-.control-panel .button-group button:hover, .apply-button:hover {
-  background-color: #45a049;
-}
-.control-panel .button-group button.active {
-  background-color: #007BFF;
+  transition: all 0.3s ease;
+  font-weight: 500;
+  font-size: 14px;
 }
 
-.control-panel .button-group button:disabled {
-  background-color: #555;
+.control-btn:hover {
+  border-color: #3b82f6;
+  color: #3b82f6;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.control-btn.active {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border-color: #3b82f6;
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+}
+
+.control-btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
+  transform: none !important;
 }
 
-/* 关闭摄像头按钮样式 */
-.disconnect-button {
-  background-color: #f44336 !important;
-}
-.disconnect-button:hover {
-  background-color: #d32f2f !important;
-}
-
+/* 告警容器 */
 .alerts-container {
-  height: 150px;
+  height: 200px;
   overflow-y: auto;
-  border: 1px solid #444;
-  padding: 0.5rem;
-  border-radius: 4px;
-  background-color: #2a2a2e;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db #f9fafb;
 }
 
-.alerts-container.has-alerts {
-  border-color: #f44336;
+.alerts-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.alerts-container::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 2px;
 }
 
 .alert-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  padding: 12px;
 }
 
 .alert-item {
-  background-color: #533;
-  padding: 0.5rem;
-  border-radius: 4px;
-  color: #ffcccc;
-}
-
-.user-list-container {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid #444;
-  padding: 0.5rem;
-  border-radius: 4px;
-  background-color: #2a2a2e;
-}
-
-.user-list-container ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.user-list-container li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem;
-  border-bottom: 1px solid #333;
-}
-
-.user-list-container li:last-child {
-  border-bottom: none;
-}
-
-.delete-button {
-  padding: 0.2rem 0.5rem;
-  background-color: #f44336;
-  color: white;
-  border: none;
-  border-radius: 3px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: white;
+  border-radius: 8px;
+  border-left: 3px solid #3b82f6;
+  transition: all 0.3s ease;
   cursor: pointer;
 }
 
-.delete-button:hover {
-  background-color: #d32f2d;
+.alert-item:hover {
+  background: #f0f9ff;
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
+}
+
+.alert-item.alert-new {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-left-color: #f59e0b;
+  animation: newAlert 0.5s ease;
+}
+
+@keyframes newAlert {
+  0% { transform: translateX(-10px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+.alert-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.alert-time {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.alert-message {
+  margin: 0;
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.4;
+}
+
+/* 列表动画 */
+.alert-list-enter-active,
+.alert-list-leave-active {
+  transition: all 0.3s ease;
+}
+
+.alert-list-enter-from,
+.alert-list-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.alert-list-move {
+  transition: transform 0.3s ease;
+}
+
+/* 用户管理 */
+.add-user-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  margin-bottom: 16px;
+  transition: all 0.3s ease;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.add-user-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
+}
+
+.user-list-container {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+  scrollbar-width: thin;
+}
+
+.user-list {
+  list-style: none;
+  padding: 12px;
+}
+
+.user-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: all 0.3s ease;
+}
+
+.user-item:hover {
+  background: #f0f9ff;
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.delete-btn {
+  background: transparent;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.delete-btn:hover {
+  background: #fef2f2;
+  transform: scale(1.1);
+}
+
+.user-list-enter-active,
+.user-list-leave-active {
+  transition: all 0.3s ease;
+}
+
+.user-list-enter-from,
+.user-list-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.user-list-move {
+  transition: transform 0.3s ease;
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  color: #6b7280;
+}
+
+.empty-state p {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+/* 告警通知 */
+.alert-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 320px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  z-index: 2000;
+  backdrop-filter: blur(10px);
+}
+
+.notification-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+}
+
+.notification-text {
+  flex: 1;
+}
+
+.notification-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.notification-message {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.notification-close {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.notification-close:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.notification-enter-active,
+.notification-leave-active {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.notification-enter-from,
+.notification-leave-to {
+  opacity: 0;
+  transform: translateY(20px) scale(0.95);
+}
+
+/* 可拖动悬浮按钮 */
+.floating-control {
+  position: fixed;
+  z-index: 80;
+  user-select: none;
+  touch-action: none;
+}
+
+.floating-control .sidebar-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(10px);
+}
+
+.floating-control .sidebar-toggle-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 8px 30px rgba(102, 126, 234, 0.5);
+}
+
+.floating-control .sidebar-toggle-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.floating-control .sidebar-toggle-btn.sidebar-open {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
 }
 
 /* 响应式适配 */
+@media (max-width: 1200px) {
+  .control-sidebar {
+    width: 360px;
+  }
+}
+
+@media (max-width: 992px) {
+  .control-sidebar {
+    width: 340px;
+  }
+  
+  .page-title {
+    padding: 20px 24px;
+  }
+  
+  .video-container {
+    padding: 20px;
+  }
+}
+
 @media (max-width: 768px) {
-  .header-left h1 {
-    font-size: 16px;
+  .control-sidebar {
+    width: 100%;
+  }
+  
+  .page-title {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 16px 20px;
+  }
+  
+  .title-content {
+    gap: 12px;
+  }
+  
+  .page-title h1 {
+    font-size: 24px;
+  }
+  
+  .title-actions {
+    gap: 12px;
+  }
+  
+  .action-btn {
+    padding: 10px 16px;
+    font-size: 13px;
+  }
+  
+  .video-container {
+    height: calc(100vh - 280px);
+    padding: 16px;
+  }
+  
+  .alert-notification {
+    width: calc(100% - 32px);
+    max-width: 350px;
+  }
+}
+
+@media (max-width: 576px) {
+  .page-title h1 {
+    font-size: 20px;
+  }
+  
+  .title-actions {
+    gap: 8px;
+  }
+  
+  .action-btn {
+    padding: 8px 12px;
+    gap: 6px;
+  }
+  
+  .action-btn span {
+    display: none;
+  }
+  
+  .video-container {
+    height: calc(100vh - 260px);
+    padding: 12px;
+  }
+  
+  .sidebar-content {
+    padding: 16px;
+  }
+  
+  .control-section {
+    margin-bottom: 24px;
+  }
+  
+  .button-group {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 }
 </style>
-    

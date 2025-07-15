@@ -102,57 +102,78 @@
                 <!-- Case 1: Webcam is active -->
                 <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
                 
-                <!-- Case 2: RTMP流显示 -->
-                <img v-else-if="activeSource === 'rtmp'" :src="videoSource" alt="RTMP流画面" class="webcam-feed" />
-                
-                <!-- Case 3: An upload is active, so we check its type -->
-
-                <template v-if="activeSource === 'webcam'">
-                  <img ref="webcamImg" alt="摄像头实时画面" class="webcam-feed" />
-                </template>
-
+                <!-- Case 2: An upload is active, so we check its type -->
                 <template v-else-if="activeSource === 'upload'">
-                  <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
-                  <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+                    <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" class="uploaded-media" />
+                    <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay class="uploaded-media"></video>
                 </template>
 
-
-          <!-- Case 4: Loading -->
-          <div v-else-if="activeSource === 'loading'" class="loading-state">
-            <p>正在处理文件，请稍候...</p>
-            <div class="loading-spinner"></div>
-          </div>
-          
-          <!-- Case 5: Default placeholder -->
-          <div v-else class="video-placeholder">
-            <p>加载中或未连接视频源</p>
-          </div>
-        </div>
-      </div>
+                <!-- Case 3: Loading -->
+                <div v-else-if="activeSource === 'loading'" class="loading-state">
+                  <p>正在处理文件，请稍候...</p>
+                  <div class="loading-spinner"></div>
+                </div>
+                
+                <!-- Case 4: Default placeholder -->
+                <div v-else class="video-placeholder">
+                  <div class="placeholder-icon">📹</div>
+                  <p>加载中或未连接视频源</p>
+                </div>
+              </div>
+              
+              <!-- 视频状态指示器 -->
+              <div class="video-status">
+                <span 
+                  class="status-indicator" 
+                  :class="{
+                    'status-active': activeSource === 'webcam',
+                    'status-upload': activeSource === 'upload',
+                    'status-pending': activeSource === 'loading',
+                    'status-inactive': !activeSource
+                  }">
+                </span>
+                <span class="status-text">
+                  {{ activeSource === 'webcam' ? '实时监控中' : 
+                     activeSource === 'upload' ? '查看上传内容' : 
+                     activeSource === 'loading' ? '处理中' : '未连接' }}
+                </span>
+              </div>
+            </div>
+            
+                  <div class="control-panel">
+                    <h2>控制面板</h2>
+                    
+                    <!-- 视频源选择 -->
       
+              <div class="control-section">
+                      <h3>视频源</h3>
+                      <div class="button-group">
+                        <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
+                        <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
+                        <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'" class="upload-button">上传视频</button>
+      
+                  <!-- 新增RTMP流连接按钮 -->
+                  <button @click="showRtmpModal" :disabled="activeSource === 'webcam'" class="rtmp-button">RTMP流连接</button>
+
+                </div>
+                          </div>
             <div class="control-panel">
               <h2>控制面板</h2>
               
               <!-- 视频源选择 -->
-
               <div class="control-section">
                 <h3>视频源</h3>
                 <div class="button-group">
                   <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
                   <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
-                  <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
-
-                  <!-- 新增RTMP流连接按钮 -->
-                  <button @click="showRtmpModal" :disabled="activeSource === 'webcam'" class="rtmp-button">RTMP流连接</button>
-
+                  <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'" class="upload-button">上传视频</button>
                 </div>
-                <!-- The hidden file input is no longer needed here -->
               </div>
-
+              
               <!-- 检测模式选择 -->
               <div class="control-section">
                 <h3>检测模式</h3>
-                <div class="button-group">
+                <div class="button-group mode-buttons">
                   <button 
                     @click="setDetectionMode('object_detection')" 
                     :class="{ active: detectionMode === 'object_detection' }">
@@ -161,7 +182,7 @@
                   <button 
                     @click="setDetectionMode('face_only')" 
                     :class="{ active: detectionMode === 'face_only' }">
-                    纯人脸识别
+                    人脸识别
                   </button>
                   <button 
                     @click="setDetectionMode('fall_detection')" 
@@ -188,7 +209,7 @@
                   <button @click="toggleEditMode" :class="{ active: editMode }">
                     {{ editMode ? '保存区域' : '编辑区域' }}
                   </button>
-                  <button v-if="editMode" @click="cancelEdit">取消编辑</button>
+                  <button v-if="editMode" @click="cancelEdit" class="cancel-button">取消编辑</button>
                 </div>
                 <div v-if="editMode" class="edit-instructions">
                   <p>点击并拖动区域点以调整位置</p>
@@ -214,12 +235,15 @@
               </div>
               
               <!-- 告警信息 -->
-              <div class="control-section">
-                <h3>告警信息</h3>
+              <div class="control-section alerts-section">
+                <h3>告警信息
+                  <span v-if="alerts.length > 0" class="alerts-badge">{{ alerts.length }}</span>
+                </h3>
                 <div class="alerts-container" :class="{ 'has-alerts': alerts.length > 0 }">
                   <div v-if="alerts.length > 0" class="alert-list">
-                    <div v-for="(alert, index) in alerts" :key="index" class="alert-item">
-                      {{ alert }}
+                    <div v-for="(alert, index) in alerts" :key="index" class="alert-item" :class="{ 'alert-new': index === 0 && alerts.length <= 3 }">
+                      <span class="alert-icon">⚠️</span>
+                      <span class="alert-text">{{ alert }}</span>
                     </div>
                   </div>
                   <p v-else>当前无告警信息</p>
@@ -230,13 +254,15 @@
               <div class="control-section">
                 <h3>人员管理</h3>
                 <div class="button-group">
-                  <button @click="registerFace" class="apply-button">添加人员</button>
+                  <button @click="registerFace" class="apply-button register-button">添加人员</button>
                 </div>
                 <div class="user-list-container">
                   <ul v-if="registeredUsers.length > 0">
                     <li v-for="user in registeredUsers" :key="user">
-                      <span>{{ user }}</span>
-                      <button @click="deleteFace(user)" class="delete-button">删除</button>
+                      <span class="user-name">{{ user }}</span>
+                      <button @click="deleteFace(user)" class="delete-button">
+                        <i class="icon-trash">✕</i>
+                      </button>
                     </li>
                   </ul>
                   <p v-else>未注册任何人员</p>
@@ -275,7 +301,6 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue' // 引入 nextTick
 import io from 'socket.io-client'; // 引入 socket.io-client
 
 // 导入侧边栏组件
-import Sidebar from '../components/Sidebar.vue'
 
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
@@ -307,13 +332,15 @@ const editMode = ref(false)
 const alerts = ref([])
 const safetyDistance = ref(100)
 const loiteringThreshold = ref(2.0)
-const detectionMode = ref('object_detection') // 新增：检测模式状态
+const detectionMode = ref('object_detection') // 检测模式状态
 const originalDangerZone = ref(null)
-// const fileInput = ref(null) // No longer needed
-const faceFileInput = ref(null) // 用于人脸注册的文件输入
 const registeredUsers = ref([]) // 已注册用户列表
 const pollingIntervalId = ref(null) // 用于轮询的定时器ID
 const videoTaskId = ref(''); // 保存当前视频处理任务的ID
+
+// 路由相关
+const route = useRoute()
+const currentPath = ref(route.path)
 const webcamImg = ref(null);
 
 // 新增：RTMP流相关状态
@@ -1050,6 +1077,7 @@ onUnmounted(() => {
   min-height: 100vh;
   background-color: #121212;
   color: #e0e0e0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 /* 顶部导航栏样式 */
@@ -1060,10 +1088,11 @@ onUnmounted(() => {
   padding: 0 20px;
   height: 60px;
   background-color: #1e1e1e;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
   position: sticky;
   top: 0;
   z-index: 100;
+  border-bottom: 1px solid #333;
 }
 
 .header-left h1 {
@@ -1071,6 +1100,7 @@ onUnmounted(() => {
   font-size: 20px;
   font-weight: 600;
   color: #e0e0e0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .header-right {
@@ -1082,6 +1112,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+}
+
+.profile-info:hover {
+  background-color: #2a2a2a;
 }
 
 .avatar {
@@ -1089,7 +1126,13 @@ onUnmounted(() => {
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  transition: transform 0.3s, border-color 0.3s;
+}
+
+.avatar:hover {
+  transform: scale(1.05);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .avatar img {
@@ -1134,32 +1177,77 @@ onUnmounted(() => {
   color: #fff;
   background-color: #1a1a1a;
   border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.monitor-page:hover {
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.4);
 }
 
 .monitor-page h1 {
   text-align: center;
   margin-bottom: 2rem;
   color: #e0e0e0;
+  font-weight: 500;
+  position: relative;
+  padding-bottom: 10px;
 }
+
+.monitor-page h1::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 3px;
+  background: linear-gradient(90deg, #4CAF50, #8BC34A);
+  border-radius: 3px;
+}
+
 .monitor-container {
   display: flex;
   gap: 2rem;
   flex-wrap: wrap;
 }
+
 .video-container, .control-panel {
   flex: 1;
   min-width: 300px;
   border-radius: 8px;
   padding: 1.5rem;
   background-color: #2d2d2d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
+
+.video-container:hover, .control-panel:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
 .video-container h2, .control-panel h2 {
   margin-top: 0;
   margin-bottom: 1.5rem;
   border-bottom: 1px solid #444;
   padding-bottom: 0.5rem;
   color: #e0e0e0;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.video-container h2::before, .control-panel h2::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 20px;
+  background-color: #4CAF50;
+  border-radius: 2px;
+}
+
 .video-wrapper {
   width: 100%;
   height: 480px;
@@ -1171,6 +1259,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   position: relative;
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.5);
 }
 
 .webcam-feed {
@@ -1178,25 +1267,46 @@ onUnmounted(() => {
   height: 100%;
   object-fit: contain;
   display: block;
+  transition: opacity 0.3s;
 }
 
 .video-wrapper img, .video-wrapper video {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  transition: all 0.3s ease;
 }
+
+.video-wrapper:hover img, .video-wrapper:hover video {
+  filter: brightness(1.05);
+}
+
 .video-placeholder, .loading-state {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   height: 100%;
   color: #888;
+  text-align: center;
+  padding: 20px;
+}
+
+.placeholder-icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+  color: #555;
+  transition: transform 0.3s, color 0.3s;
+}
+
+.video-placeholder:hover .placeholder-icon {
+  transform: scale(1.1);
+  color: #666;
 }
 
 .loading-spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
+  border: 4px solid rgba(76, 175, 80, 0.2);
+  border-top: 4px solid #4CAF50;
   border-radius: 50%;
   width: 40px;
   height: 40px;
@@ -1211,17 +1321,39 @@ onUnmounted(() => {
 
 .control-section {
   margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px dashed #444;
 }
+
+.control-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
 .control-section h3 {
   margin-bottom: 1rem;
   color: #ccc;
+  font-size: 16px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+
+.control-section h3::before {
+  content: '•';
+  color: #4CAF50;
+}
+
 /* 控制面板按钮组样式 */
 .control-panel .button-group {
   display: flex;
   gap: 1rem;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
 }
+
 .control-panel .button-group button, .apply-button {
   padding: 0.5rem 1rem;
   border: none;
@@ -1229,26 +1361,87 @@ onUnmounted(() => {
   background-color: #4CAF50;
   color: white;
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: all 0.2s;
+  font-size: 14px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
 }
+
+.control-panel .button-group button::after, .apply-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  transition: 0.5s;
+}
+
+.control-panel .button-group button:hover::after, .apply-button:hover::after {
+  left: 100%;
+}
+
 .control-panel .button-group button:hover, .apply-button:hover {
   background-color: #45a049;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
+
+.control-panel .button-group button:active, .apply-button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
 .control-panel .button-group button.active {
   background-color: #007BFF;
+}
+
+.control-panel .button-group button.active:hover {
+  background-color: #0069D9;
 }
 
 .control-panel .button-group button:disabled {
   background-color: #555;
   cursor: not-allowed;
+  opacity: 0.7;
+  transform: none;
+  box-shadow: none;
+}
+
+.control-panel .button-group button:disabled:hover::after {
+  left: -100%;
 }
 
 /* 关闭摄像头按钮样式 */
 .disconnect-button {
   background-color: #f44336 !important;
 }
+
 .disconnect-button:hover {
   background-color: #d32f2f !important;
+}
+
+.upload-button {
+  background-color: #2196F3 !important;
+}
+
+.upload-button:hover {
+  background-color: #0b7dda !important;
+}
+
+.mode-buttons {
+  gap: 0.5rem;
+}
+
+.mode-buttons button {
+  flex: 1;
+  min-width: 80px;
+  justify-content: center;
 }
 
 .edit-instructions {
@@ -1259,6 +1452,12 @@ onUnmounted(() => {
   padding: 0.8rem;
   border-radius: 4px;
   border-left: 3px solid #007BFF;
+  transition: all 0.2s;
+}
+
+.edit-instructions:hover {
+  transform: translateX(2px);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.1);
 }
 
 .setting-row {
@@ -1272,11 +1471,37 @@ onUnmounted(() => {
 .setting-row label {
   flex-basis: 120px;
   color: #ddd;
+  font-size: 14px;
 }
 
 .setting-row input[type="range"] {
   flex-grow: 1;
   accent-color: #4CAF50;
+  height: 6px;
+  border-radius: 3px;
+  background: #444;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.setting-row input[type="range"]:hover {
+  accent-color: #45a049;
+}
+
+.setting-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #4CAF50;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.setting-row input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 5px rgba(76, 175, 80, 0.5);
 }
 
 .setting-row span {
@@ -1286,6 +1511,26 @@ onUnmounted(() => {
   background-color: #3a3a3a;
   padding: 0.2rem 0.5rem;
   border-radius: 3px;
+  font-size: 14px;
+}
+
+.alerts-section {
+  position: relative;
+}
+
+.alerts-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #f44336;
+  color: white;
+  font-size: 12px;
+  margin-left: 5px;
+  transform: translateY(-2px);
+  transition: transform 0.2s;
 }
 
 .alerts-container {
@@ -1295,10 +1540,11 @@ onUnmounted(() => {
   padding: 0.5rem;
   border-radius: 4px;
   background-color: #2a2a2e;
+  transition: all 0.2s;
 }
 
 .alerts-container.has-alerts {
-  border-color: #f44336;
+  border-color: rgba(244, 67, 54, 0.5);
 }
 
 .alert-list {
@@ -1308,12 +1554,31 @@ onUnmounted(() => {
 }
 
 .alert-item {
-  background-color: #533;
+  background-color: rgba(244, 67, 54, 0.1);
   padding: 0.5rem;
   border-radius: 4px;
   color: #ffcccc;
   border-left: 3px solid #f44336;
   animation: fadeIn 0.3s ease-in-out;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.alert-item:hover {
+  background-color: rgba(244, 67, 54, 0.15);
+  transform: translateX(2px);
+}
+
+.alert-new {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(244, 67, 54, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
 }
 
 @keyframes fadeIn {
@@ -1328,6 +1593,11 @@ onUnmounted(() => {
   padding: 0.5rem;
   border-radius: 4px;
   background-color: #2a2a2e;
+  transition: all 0.2s;
+}
+
+.user-list-container:hover {
+  border-color: #555;
 }
 
 .user-list-container ul {
@@ -1342,29 +1612,121 @@ onUnmounted(() => {
   align-items: center;
   padding: 0.5rem;
   border-bottom: 1px solid #333;
-  transition: background-color 0.2s;
-}
-
-.user-list-container li:hover {
-  background-color: #3a3a3a;
+  transition: all 0.2s;
 }
 
 .user-list-container li:last-child {
   border-bottom: none;
 }
 
+.user-list-container li:hover {
+  background-color: #3a3a3a;
+  transform: translateX(2px);
+}
+
+.user-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-name::before {
+  content: '👤';
+  font-size: 14px;
+}
+
 .delete-button {
   padding: 0.2rem 0.5rem;
-  background-color: #f44336;
+  background-color: rgba(244, 67, 54, 0.8);
   color: white;
   border: none;
   border-radius: 3px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  opacity: 0.7;
 }
 
 .delete-button:hover {
-  background-color: #d32f2d;
+  background-color: #f44336;
+  transform: scale(1.05);
+  opacity: 1;
+}
+
+.video-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 10px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-active {
+  background-color: #4CAF50;
+  animation: pulse-active 2s infinite;
+}
+
+.status-upload {
+  background-color: #2196F3;
+}
+
+.status-pending {
+  background-color: #FFC107;
+  animation: blink 1s infinite;
+}
+
+.status-inactive {
+  background-color: #666;
+}
+
+@keyframes pulse-active {
+  0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(76, 175, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.cancel-button {
+  background-color: #6c757d !important;
+}
+
+.cancel-button:hover {
+  background-color: #5a6268 !important;
+}
+
+.register-button {
+  background-color: #9C27B0 !important;
+}
+
+.register-button:hover {
+  background-color: #7B1FA2 !important;
+}
+
+.uploaded-media {
+  transition: all 0.3s ease;
+}
+
+.uploaded-media:hover {
+  filter: brightness(1.05);
+  transform: scale(1.01);
 }
 
 /* 响应式适配 */
@@ -1388,6 +1750,19 @@ onUnmounted(() => {
   .setting-row label {
     flex-basis: 100%;
     margin-bottom: 0.5rem;
+  }
+  
+  .control-panel .button-group {
+    gap: 0.5rem;
+  }
+  
+  .control-panel .button-group button {
+    padding: 0.4rem 0.8rem;
+    font-size: 13px;
+  }
+  
+  .status-text {
+    font-size: 13px;
   }
 }
 
