@@ -36,6 +36,55 @@
       </div>
     </div>
 
+    <!-- 新增：RTMP流连接模态框 -->
+    <div v-if="showRtmpConnectionModal" class="rtmp-modal-overlay">
+      <div class="rtmp-modal-content">
+        <h2>RTMP流连接配置</h2>
+        <div class="rtmp-form">
+          <div class="form-group">
+            <label>流名称:</label>
+            <input v-model="rtmpConfig.name" type="text" placeholder="请输入流名称" class="rtmp-input" />
+          </div>
+          <div class="form-group">
+            <label>RTMP地址:</label>
+            <input v-model="rtmpConfig.rtmp_url" type="text" placeholder="rtmp://example.com/live/stream" class="rtmp-input" />
+          </div>
+          <div class="form-group">
+            <label>描述 (可选):</label>
+            <input v-model="rtmpConfig.description" type="text" placeholder="流描述信息" class="rtmp-input" />
+          </div>
+          <div class="form-group">
+            <label>检测模式:</label>
+            <div class="detection-modes">
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="rtmpConfig.detection_modes" value="object_detection" />
+                目标检测
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="rtmpConfig.detection_modes" value="face_only" />
+                人脸识别
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="rtmpConfig.detection_modes" value="fall_detection" />
+                跌倒检测
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="rtmpConfig.detection_modes" value="smoking_detection" />
+                抽烟检测
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="rtmp-controls">
+          <button @click="connectRtmpStream" class="connect-button" :disabled="!rtmpConfig.name || !rtmpConfig.rtmp_url">连接流</button>
+          <button @click="closeRtmpModal" class="cancel-button">取消</button>
+        </div>
+        <div v-if="rtmpStatus" class="rtmp-status">
+          <p>{{ rtmpStatus }}</p>
+        </div>
+      </div>
+    </div>
+
     <div class="main-content">
       <!-- 引入复用的侧边栏组件 -->
       <Sidebar :currentPath="currentPath" />
@@ -49,41 +98,56 @@
             <div class="video-container">
               <h2>监控视图</h2>
               <div class="video-wrapper">
+
                 <!-- Case 1: Webcam is active -->
                 <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
                 
-                <!-- Case 2: An upload is active, so we check its type -->
-                <template v-else-if="activeSource === 'upload'">
-                    <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
-                    <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+                <!-- Case 2: RTMP流显示 -->
+                <img v-else-if="activeSource === 'rtmp'" :src="videoSource" alt="RTMP流画面" class="webcam-feed" />
+                
+                <!-- Case 3: An upload is active, so we check its type -->
+
+                <template v-if="activeSource === 'webcam'">
+                  <img ref="webcamImg" alt="摄像头实时画面" class="webcam-feed" />
                 </template>
 
-          <!-- Case 3: Loading -->
+                <template v-else-if="activeSource === 'upload'">
+                  <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
+                  <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+                </template>
+
+
+          <!-- Case 4: Loading -->
           <div v-else-if="activeSource === 'loading'" class="loading-state">
             <p>正在处理文件，请稍候...</p>
             <div class="loading-spinner"></div>
           </div>
           
-          <!-- Case 4: Default placeholder -->
+          <!-- Case 5: Default placeholder -->
           <div v-else class="video-placeholder">
             <p>加载中或未连接视频源</p>
           </div>
         </div>
       </div>
       
-      <div class="control-panel">
-        <h2>控制面板</h2>
-        
-        <!-- 视频源选择 -->
-        <div class="control-section">
-          <h3>视频源</h3>
-          <div class="button-group">
-            <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
-            <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
-            <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
-          </div>
-          <!-- The hidden file input is no longer needed here -->
-        </div>
+            <div class="control-panel">
+              <h2>控制面板</h2>
+              
+              <!-- 视频源选择 -->
+
+              <div class="control-section">
+                <h3>视频源</h3>
+                <div class="button-group">
+                  <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
+                  <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
+                  <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
+
+                  <!-- 新增RTMP流连接按钮 -->
+                  <button @click="showRtmpModal" :disabled="activeSource === 'webcam'" class="rtmp-button">RTMP流连接</button>
+
+                </div>
+                <!-- The hidden file input is no longer needed here -->
+              </div>
 
               <!-- 检测模式选择 -->
               <div class="control-section">
@@ -108,6 +172,11 @@
                     @click="setDetectionMode('smoking_detection')" 
                     :class="{ active: detectionMode === 'smoking_detection' }">
                     抽烟检测
+                  </button>
+                  <button 
+                    @click="setDetectionMode('violence_detection')" 
+                    :class="{ active: detectionMode === 'violence_detection' }">
+                    暴力检测
                   </button>
                 </div>
               </div>
@@ -173,6 +242,25 @@
                   <p v-else>未注册任何人员</p>
                 </div>
               </div>
+
+              <!-- 新增：活动流列表 -->
+              <div v-if="activeStreams.length > 0" class="control-section">
+                <h3>活动RTMP流</h3>
+                <div class="stream-list">
+                  <div v-for="stream in activeStreams" :key="stream.stream_id" class="stream-item">
+                    <div class="stream-info">
+                      <h4>{{ stream.name }}</h4>
+                      <p>{{ stream.rtmp_url }}</p>
+                      <span class="stream-status" :class="stream.status">{{ stream.status }}</span>
+                    </div>
+                    <div class="stream-controls">
+                      <button @click="selectRtmpStream(stream.stream_id)" class="select-button" :class="{ active: currentRtmpStream === stream.stream_id }">选择</button>
+                      <button @click="stopRtmpStream(stream.stream_id)" class="stop-button">停止</button>
+                      <button @click="deleteRtmpStream(stream.stream_id)" class="delete-button">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -214,7 +302,7 @@ const stopStream = (stream) => {
 
 // 状态变量
 const videoSource = ref('') // 视频源URL
-const activeSource = ref('') // 'webcam', 'upload', 'loading'
+const activeSource = ref('') // 'webcam', 'upload', 'loading', 'rtmp'
 const editMode = ref(false)
 const alerts = ref([])
 const safetyDistance = ref(100)
@@ -226,6 +314,20 @@ const faceFileInput = ref(null) // 用于人脸注册的文件输入
 const registeredUsers = ref([]) // 已注册用户列表
 const pollingIntervalId = ref(null) // 用于轮询的定时器ID
 const videoTaskId = ref(''); // 保存当前视频处理任务的ID
+const webcamImg = ref(null);
+
+// 新增：RTMP流相关状态
+const showRtmpConnectionModal = ref(false)
+const rtmpConfig = ref({
+  name: '',
+  rtmp_url: '',
+  description: '',
+  detection_modes: ['object_detection']
+})
+const rtmpStatus = ref('')
+const activeStreams = ref([])
+const currentRtmpStream = ref('')
+const rtmpSocket = ref(null)
 
 // --- API 调用封装 ---
 // 使用新的 DLIB_API_BASE_URL
@@ -285,7 +387,8 @@ const setDetectionMode = async (mode) => {
       'object_detection': '目标检测',
       'face_only': '纯人脸识别',
       'fall_detection': '跌倒检测',
-      'smoking_detection': '抽烟检测'
+      'smoking_detection': '抽烟检测',
+      'violence_detection': '暴力检测'
     };
     alert(`检测模式已切换为: ${modeNames[mode] || mode}`);
 
@@ -473,9 +576,12 @@ const closeRegistrationModal = (isUnmounting = false) => {
 // --- 视频/图像处理 ---
 const connectWebcam = () => {
   stopPolling(); // 如果有正在轮询的任务，先停止
-  // 添加时间戳来防止浏览器缓存
-  videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
   activeSource.value = 'webcam';
+  nextTick(() => {
+    if (webcamImg.value) {
+      webcamImg.value.src = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
+    }
+  });
   startAlertPolling();
 };
 
@@ -491,7 +597,7 @@ const disconnectWebcam = async () => {
   } finally {
     // 无论如何都更新前端UI
     activeSource.value = '';
-    videoSource.value = '';
+    if (webcamImg.value) webcamImg.value.src = '';
     stopAlertPolling(); // 停止轮询警报
   }
 };
@@ -717,11 +823,206 @@ const startAlertPolling = () => {
   }, 2000) // 轮询频率调整为2秒
 }
 
+// --- RTMP流管理 ---
+const showRtmpModal = () => {
+  showRtmpConnectionModal.value = true
+  rtmpConfig.value = {
+    name: '',
+    rtmp_url: '',
+    description: '',
+    detection_modes: ['object_detection']
+  }
+  rtmpStatus.value = ''
+}
+
+const closeRtmpModal = () => {
+  showRtmpConnectionModal.value = false
+  rtmpStatus.value = ''
+}
+
+const connectRtmpStream = async () => {
+  if (!rtmpConfig.value.name || !rtmpConfig.value.rtmp_url) {
+    alert('请填写流名称和RTMP地址')
+    return
+  }
+
+  rtmpStatus.value = '正在连接RTMP流...'
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/streams`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(rtmpConfig.value)
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      rtmpStatus.value = '流创建成功，正在启动...'
+      
+      // 启动流处理
+      await startRtmpStream(data.stream_id)
+      
+      // 刷新流列表
+      await loadActiveStreams()
+      
+      closeRtmpModal()
+    } else {
+      const errorData = await response.json()
+      rtmpStatus.value = `连接失败: ${errorData.detail || '未知错误'}`
+    }
+  } catch (error) {
+    rtmpStatus.value = `连接失败: ${error.message}`
+    console.error('RTMP连接错误:', error)
+  }
+}
+
+const startRtmpStream = async (streamId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/streams/${streamId}/start`, {
+      method: 'POST'
+    })
+    
+    if (response.ok) {
+      console.log('RTMP流启动成功')
+    } else {
+      throw new Error('启动流失败')
+    }
+  } catch (error) {
+    console.error('启动RTMP流错误:', error)
+    alert(`启动流失败: ${error.message}`)
+  }
+}
+
+const loadActiveStreams = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/streams`)
+    if (response.ok) {
+      const data = await response.json()
+      activeStreams.value = data
+    }
+  } catch (error) {
+    console.error('加载流列表错误:', error)
+  }
+}
+
+const selectRtmpStream = (streamId) => {
+  currentRtmpStream.value = streamId
+  // 切换到RTMP流显示
+  activeSource.value = 'rtmp'
+  videoSource.value = `${API_BASE_URL}/streams/${streamId}/feed?t=${new Date().getTime()}`
+  
+  // 开始接收该流的检测结果
+  connectToRtmpSocket(streamId)
+}
+
+const connectToRtmpSocket = (streamId) => {
+  if (rtmpSocket.value) {
+    rtmpSocket.value.disconnect()
+  }
+  
+  rtmpSocket.value = io(`${SERVER_ROOT_URL}/rtmp`)
+  
+  rtmpSocket.value.on('connect', () => {
+    console.log('已连接到RTMP WebSocket')
+    rtmpSocket.value.emit('join_stream', { stream_id: streamId })
+  })
+  
+  rtmpSocket.value.on('detection_result', (data) => {
+    if (data.stream_id === currentRtmpStream.value) {
+      // 更新检测结果和告警
+      alerts.value = data.alerts || []
+    }
+  })
+  
+  rtmpSocket.value.on('error', (error) => {
+    console.error('RTMP WebSocket错误:', error)
+  })
+}
+
+const stopRtmpStream = async (streamId) => {
+  try {
+    console.log(`正在停止流: ${streamId}`);
+    const response = await fetch(`${API_BASE_URL}/streams/${streamId}/stop`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+    
+    console.log('停止流响应状态:', response.status);
+    
+    if (response.ok) {
+      const result = await response.json();
+      console.log('停止流成功:', result);
+      
+      if (currentRtmpStream.value === streamId) {
+        activeSource.value = ''
+        videoSource.value = ''
+        currentRtmpStream.value = ''
+        if (rtmpSocket.value) {
+          rtmpSocket.value.disconnect()
+          rtmpSocket.value = null
+        }
+      }
+      await loadActiveStreams()
+      alert('流停止成功!');
+    } else {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `HTTP ${response.status}`);
+    }
+  } catch (error) {
+    console.error('停止RTMP流错误:', error)
+    alert(`停止流失败: ${error.message}`)
+  }
+}
+
+const deleteRtmpStream = async (streamId) => {
+  if (confirm('确定要删除这个RTMP流吗？')) {
+    try {
+      console.log(`正在删除流: ${streamId}`);
+      const response = await fetch(`${API_BASE_URL}/streams/${streamId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      console.log('删除流响应状态:', response.status);
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('删除流成功:', result);
+        
+        if (currentRtmpStream.value === streamId) {
+          activeSource.value = ''
+          videoSource.value = ''
+          currentRtmpStream.value = ''
+          if (rtmpSocket.value) {
+            rtmpSocket.value.disconnect()
+            rtmpSocket.value = null
+          }
+        }
+        await loadActiveStreams()
+        alert('流删除成功!');
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.error('删除RTMP流错误:', error)
+      alert(`删除流失败: ${error.message}`)
+    }
+  }
+}
+
 // 生命周期钩子
 onMounted(() => {
   loadConfig()
   loadRegisteredUsers() // 页面加载时获取已注册用户
   loadDetectionMode() // 新增：页面加载时获取当前检测模式
+  loadActiveStreams() // 新增：加载活动流列表
 })
 
 onUnmounted(() => {
@@ -733,6 +1034,11 @@ onUnmounted(() => {
   // 停止所有正在运行的视频流
   disconnectWebcam(); // 这个函数现在会处理摄像头关闭
   closeRegistrationModal(true); // 组件卸载时确保清理, 并告知函数不要重启摄像头
+  
+  // 新增：清理RTMP WebSocket连接
+  if (rtmpSocket.value) {
+    rtmpSocket.value.disconnect()
+  }
 });
 </script>
 
@@ -1168,5 +1474,248 @@ onUnmounted(() => {
 }
 .finish-button:hover {
   background-color: #45a049;
+}
+
+/* 新增：RTMP模态框样式 */
+.rtmp-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.rtmp-modal-content {
+  background-color: #2c2c2c;
+  padding: 30px;
+  border-radius: 10px;
+  border: 1px solid #444;
+  color: #fff;
+  width: 600px;
+  max-width: 90%;
+}
+
+.rtmp-modal-content h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.8em;
+  color: #FF9800;
+  text-align: center;
+}
+
+.rtmp-form {
+  margin-bottom: 20px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  color: #ddd;
+  font-weight: bold;
+}
+
+.rtmp-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #555;
+  border-radius: 5px;
+  background-color: #333;
+  color: #fff;
+  font-size: 14px;
+}
+
+.rtmp-input:focus {
+  outline: none;
+  border-color: #FF9800;
+}
+
+.detection-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #ddd;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  accent-color: #FF9800;
+}
+
+.rtmp-controls {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  margin-bottom: 15px;
+}
+
+.connect-button {
+  background-color: #4CAF50;
+  color: white;
+  padding: 12px 25px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1.1em;
+  transition: background-color 0.3s ease;
+}
+
+.connect-button:hover:not(:disabled) {
+  background-color: #45a049;
+}
+
+.connect-button:disabled {
+  background-color: #555;
+  cursor: not-allowed;
+}
+
+.cancel-button {
+  background-color: #f44336;
+  color: white;
+  padding: 12px 25px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1.1em;
+  transition: background-color 0.3s ease;
+}
+
+.cancel-button:hover {
+  background-color: #d32f2f;
+}
+
+.rtmp-status {
+  text-align: center;
+  padding: 10px;
+  background-color: #333;
+  border-radius: 5px;
+  color: #ddd;
+}
+
+/* RTMP流连接按钮样式 */
+.rtmp-button {
+  background-color: #FF9800 !important;
+}
+.rtmp-button:hover {
+  background-color: #F57C00 !important;
+}
+
+/* 活动流列表样式 */
+.stream-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #444;
+  border-radius: 5px;
+  background-color: #2a2a2e;
+}
+
+.stream-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border-bottom: 1px solid #333;
+  transition: background-color 0.2s;
+}
+
+.stream-item:hover {
+  background-color: #3a3a3a;
+}
+
+.stream-item:last-child {
+  border-bottom: none;
+}
+
+.stream-info h4 {
+  margin: 0 0 5px 0;
+  color: #e0e0e0;
+}
+
+.stream-info p {
+  margin: 0 0 5px 0;
+  color: #aaa;
+  font-size: 0.9em;
+  word-break: break-all;
+}
+
+.stream-status {
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 0.8em;
+  font-weight: bold;
+}
+
+.stream-status.active {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.stream-status.inactive {
+  background-color: #757575;
+  color: white;
+}
+
+.stream-status.error {
+  background-color: #f44336;
+  color: white;
+}
+
+.stream-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.select-button, .stop-button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.select-button {
+  background-color: #2196F3;
+  color: white;
+}
+
+.select-button:hover {
+  background-color: #1976D2;
+}
+
+.select-button.active {
+  background-color: #FF9800;
+}
+
+.stop-button {
+  background-color: #FF5722;
+  color: white;
+}
+
+.stop-button:hover {
+  background-color: #E64A19;
+}
+
+.stream-controls .delete-button {
+  background-color: #dc3545;
+  color: white;
+}
+
+.stream-controls .delete-button:hover {
+  background-color: #c82333;
 }
 </style>

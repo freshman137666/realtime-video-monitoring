@@ -6,9 +6,11 @@ from flask import Response
 from ultralytics import YOLO
 
 from app.services import detection as detection_service
-from app.services.danger_zone import DANGER_ZONE
-from app.services.alerts import update_detection_time, reset_alerts
+from app.services.alerts import update_detection_time, reset_alerts, add_alert
 from app.services import system_state
+from app.services.violenceDetect import load_model_safely, process_frame as violence_process_frame, CUSTOM_OBJECTS
+import tensorflow as tf
+from collections import deque
 
 # 全局变量，用于控制摄像头视频流的循环
 CAMERA_ACTIVE = False
@@ -33,6 +35,16 @@ def video_feed():
     smoking_model_service = detection_service.get_smoking_model() # This is a stateless service wrapper
     face_recognition_cache = {} # Create a fresh cache for this session
 
+    # 暴力检测模型和特征提取器（仅在首次用到时加载）
+    violence_model = None
+    vgg_model = None
+    image_model_transfer = None
+    violence_buffer = deque(maxlen=20)
+    violence_status = "unknown"
+    violence_prob = 0.0
+    violence_last_infer_frame = -100
+    violence_infer_interval = 10  # 每10帧推理一次
+
     # 打开默认摄像头
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -45,7 +57,9 @@ def video_feed():
     new_frame_time = 0
 
     def generate():
-        nonlocal frame_count, prev_frame_time, new_frame_time
+        nonlocal object_model_stream, face_model_stream, pose_model_stream
+        nonlocal frame_count, prev_frame_time, new_frame_time, violence_model, vgg_model, image_model_transfer, violence_buffer, violence_status, violence_prob, violence_last_infer_frame
+
         try:
             while CAMERA_ACTIVE:
                 ret, frame = cap.read()
@@ -61,7 +75,12 @@ def video_feed():
                 if time_diff_fps > 0:
                     fps = 1 / time_diff_fps
                     fps_text = f"FPS: {int(fps)}"
-                    cv2.putText(frame, fps_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    # --- 修改：将FPS显示移动到右上角 ---
+                    # 获取文本大小以便精确放置
+                    (text_width, _), _ = cv2.getTextSize(fps_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
+                    # 从帧宽度中减去文本宽度和一些边距（10px）
+                    top_right_x = frame.shape[1] - text_width - 10
+                    cv2.putText(frame, fps_text, (top_right_x, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                 prev_frame_time = new_frame_time
 
                 # 诊断日志
@@ -72,7 +91,46 @@ def video_feed():
                 processed_frame = frame # 将带有FPS文本的帧作为处理的基础
 
                 # 根据当前模式决定处理方式 (All modes now use session-local models)
-                if system_state.DETECTION_MODE == 'object_detection':
+                if system_state.DETECTION_MODE == 'violence_detection':
+                    # 初始化模型和特征提取器
+                    if violence_model is None:
+                        import os
+                        model_path = os.path.join(os.path.dirname(__file__), 'vd.hdf5')
+                        violence_model = load_model_safely(model_path)
+                        try:
+                            vgg_model = tf.keras.applications.VGG16(include_top=True, weights='imagenet')
+                        except Exception:
+                            vgg_model = tf.keras.applications.VGG16(include_top=True, weights=None)
+                        transfer_layer = vgg_model.get_layer('fc2')
+                        image_model_transfer = tf.keras.models.Model(inputs=vgg_model.input, outputs=transfer_layer.output)
+                    # 处理帧并加入缓冲区
+                    violence_buffer.append(violence_process_frame(frame))
+                    # 每N帧推理一次
+                    if len(violence_buffer) == 20 and (frame_count - violence_last_infer_frame >= violence_infer_interval):
+                        violence_last_infer_frame = frame_count
+                        try:
+                            transfer_values = image_model_transfer.predict(np.array(violence_buffer), verbose=0)
+                            prediction = violence_model.predict(np.array([transfer_values]), verbose=0)
+                            violence_prob = float(prediction[0][0])
+                            # 状态判断
+                            if violence_prob <= 0.5:
+                                violence_status = "safe"
+                            elif violence_prob <= 0.7:
+                                violence_status = "caution"
+                                add_alert("caution: 检测到可能的暴力行为")
+                            else:
+                                violence_status = "warning"
+                                add_alert("warning: 检测到高概率暴力行为!")
+                        except Exception as e:
+                            violence_status = "error"
+                            violence_prob = 0.0
+                            print(f"暴力检测推理异常: {e}")
+                    # 叠加状态到画面
+                    color = (0, 255, 0) if violence_status == "safe" else (0, 255, 255) if violence_status == "caution" else (0, 0, 255)
+                    cv2.putText(processed_frame, f"state: {violence_status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    cv2.putText(processed_frame, f"violenceProbability: {violence_prob:.4f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                
+                elif system_state.DETECTION_MODE == 'object_detection':
                     outputs = object_model_stream.track(processed_frame, persist=True)
                     detection_service.process_object_detection_results(outputs, processed_frame, time_diff, frame_count)
                 
@@ -101,15 +159,32 @@ def video_feed():
                 # 以multipart格式产生输出帧
                 yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
                       bytearray(encodedImage) + b'\r\n')
+        
+        except (GeneratorExit, ConnectionAbortedError):
+            print("客户端断开连接，正在清理视频流资源...")
         finally:
-            # 确保无论如何都能释放摄像头
-            print("释放摄像头资源...")
+            print("释放摄像头和模型资源...")
             cap.release()
-            cv2.destroyAllWindows()
+
+            # 显式删除模型实例以释放内存
+            del object_model_stream
+            del face_model_stream
+            del pose_model_stream
             
-    # 返回一个包含视频流的HTTP响应
+            if violence_model:
+                del violence_model
+            if vgg_model:
+                del vgg_model
+            if image_model_transfer:
+                del image_model_transfer
+            
+            # 对于TensorFlow模型，清理会话至关重要
+            tf.keras.backend.clear_session()
+            
+            print("所有模型和摄像头资源已成功释放。")
+
     return Response(generate(),
-                    mimetype = "multipart/x-mixed-replace; boundary=frame")
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 def stop_video_feed_service():
     """停止摄像头视频流的服务函数"""

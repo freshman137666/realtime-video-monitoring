@@ -4,6 +4,7 @@ import librosa
 import tensorflow as tf
 import tkinter as tk
 from threading import Thread
+import time  # 新增导入
 
 def load_model_with_fallback():
     # try:
@@ -56,16 +57,25 @@ def extract_features(audio, sr):
     mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
     return np.mean(mfcc.T, axis=0)
 
+# 新增全局变量，记录尖叫提示的结束时间
+scream_active_until = 0
+
 # Function to process real-time audio
 def detect_scream(indata, frames, time, status):
+    global scream_active_until  # 声明全局变量
     audio_data = indata[:, 0]  
     features = extract_features(audio_data, 22050)  # Use 22050Hz sample rate
 
     # 修改：关闭预测进度条输出 (verbose=0)
     prediction = model.predict(np.array([features]), verbose=0)[0][0]
 
+    current_time = time.time()  # 获取当前时间
     if prediction > 0.5:
-        # 修改:只更新GUI状态，不发送警报
+        # 检测到尖叫，设置提示结束时间为当前时间+60秒
+        scream_active_until = current_time + 60
+    
+    # 检查是否在尖叫提示有效期内
+    if current_time < scream_active_until:
         status_label.config(text="🚨 Scream detected!", fg="red")
     else:
         status_label.config(text="✅ No scream detected", fg="green")
