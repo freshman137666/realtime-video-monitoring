@@ -98,6 +98,7 @@
             <div class="video-container">
               <h2>监控视图</h2>
               <div class="video-wrapper">
+
                 <!-- Case 1: Webcam is active -->
                 <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
                 
@@ -105,10 +106,16 @@
                 <img v-else-if="activeSource === 'rtmp'" :src="videoSource" alt="RTMP流画面" class="webcam-feed" />
                 
                 <!-- Case 3: An upload is active, so we check its type -->
-                <template v-else-if="activeSource === 'upload'">
-                    <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
-                    <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+
+                <template v-if="activeSource === 'webcam'">
+                  <img ref="webcamImg" alt="摄像头实时画面" class="webcam-feed" />
                 </template>
+
+                <template v-else-if="activeSource === 'upload'">
+                  <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
+                  <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
+                </template>
+
 
           <!-- Case 4: Loading -->
           <div v-else-if="activeSource === 'loading'" class="loading-state">
@@ -127,14 +134,32 @@
         <h2>控制面板</h2>
         
         <!-- 视频源选择 -->
+
+                <div v-else-if="activeSource === 'loading'" class="loading-state">
+                  <p>正在处理文件，请稍候...</p>
+                  <div class="loading-spinner"></div>
+                </div>
+                <div v-else class="video-placeholder">
+                  <p>加载中或未连接视频源</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="control-panel">
+              <h2>控制面板</h2>
+              
+              <!-- 视频源选择 -->
+
               <div class="control-section">
                 <h3>视频源</h3>
                 <div class="button-group">
                   <button @click="connectWebcam" :class="{ active: activeSource === 'webcam' }">开启摄像头</button>
                   <button @click="disconnectWebcam" v-if="activeSource === 'webcam'" class="disconnect-button">关闭摄像头</button>
                   <button @click="uploadVideoFile" :disabled="activeSource === 'webcam'">上传视频</button>
+
                   <!-- 新增RTMP流连接按钮 -->
                   <button @click="showRtmpModal" :disabled="activeSource === 'webcam'" class="rtmp-button">RTMP流连接</button>
+
                 </div>
                 <!-- The hidden file input is no longer needed here -->
               </div>
@@ -162,6 +187,11 @@
                     @click="setDetectionMode('smoking_detection')" 
                     :class="{ active: detectionMode === 'smoking_detection' }">
                     抽烟检测
+                  </button>
+                  <button 
+                    @click="setDetectionMode('violence_detection')" 
+                    :class="{ active: detectionMode === 'violence_detection' }">
+                    暴力检测
                   </button>
                 </div>
               </div>
@@ -299,6 +329,7 @@ const faceFileInput = ref(null) // 用于人脸注册的文件输入
 const registeredUsers = ref([]) // 已注册用户列表
 const pollingIntervalId = ref(null) // 用于轮询的定时器ID
 const videoTaskId = ref(''); // 保存当前视频处理任务的ID
+const webcamImg = ref(null);
 
 // 新增：RTMP流相关状态
 const showRtmpConnectionModal = ref(false)
@@ -371,7 +402,8 @@ const setDetectionMode = async (mode) => {
       'object_detection': '目标检测',
       'face_only': '纯人脸识别',
       'fall_detection': '跌倒检测',
-      'smoking_detection': '抽烟检测'
+      'smoking_detection': '抽烟检测',
+      'violence_detection': '暴力检测'
     };
     alert(`检测模式已切换为: ${modeNames[mode] || mode}`);
 
@@ -559,9 +591,12 @@ const closeRegistrationModal = (isUnmounting = false) => {
 // --- 视频/图像处理 ---
 const connectWebcam = () => {
   stopPolling(); // 如果有正在轮询的任务，先停止
-  // 添加时间戳来防止浏览器缓存
-  videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
   activeSource.value = 'webcam';
+  nextTick(() => {
+    if (webcamImg.value) {
+      webcamImg.value.src = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
+    }
+  });
   startAlertPolling();
 };
 
@@ -577,7 +612,7 @@ const disconnectWebcam = async () => {
   } finally {
     // 无论如何都更新前端UI
     activeSource.value = '';
-    videoSource.value = '';
+    if (webcamImg.value) webcamImg.value.src = '';
     stopAlertPolling(); // 停止轮询警报
   }
 };
