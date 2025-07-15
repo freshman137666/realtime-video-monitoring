@@ -100,33 +100,32 @@
               <div class="video-wrapper">
 
                 <!-- Case 1: Webcam is active -->
-                <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
+                <img v-if="activeSource === 'webcam'" ref="webcamImg" alt="摄像头实时画面" class="webcam-feed" />
                 
-                <!-- Case 2: RTMP流显示 -->
-                <img v-else-if="activeSource === 'rtmp'" :src="videoSource" alt="RTMP流画面" class="webcam-feed" />
+                <!-- Case 2: RTMP流显示 - 使用Canvas -->
+                <canvas v-else-if="activeSource === 'rtmp'" 
+                        ref="rtmpCanvas" 
+                        class="rtmp-canvas" 
+                        :width="canvasWidth" 
+                        :height="canvasHeight">
+                </canvas>
                 
-                <!-- Case 3: An upload is active, so we check its type -->
-
-                <template v-if="activeSource === 'webcam'">
-                  <img ref="webcamImg" alt="摄像头实时画面" class="webcam-feed" />
-                </template>
-
+                <!-- Case 3: Upload显示 -->
                 <template v-else-if="activeSource === 'upload'">
                   <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
                   <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
                 </template>
 
-
-          <!-- Case 4: Loading -->
-          <div v-else-if="activeSource === 'loading'" class="loading-state">
-            <p>正在处理文件，请稍候...</p>
-            <div class="loading-spinner"></div>
-          </div>
-          
-          <!-- Case 5: Default placeholder -->
-          <div v-else class="video-placeholder">
-            <p>加载中或未连接视频源</p>
-          </div>
+                <!-- Case 4: Loading -->
+                <div v-else-if="activeSource === 'loading'" class="loading-state">
+                  <p>正在处理文件，请稍候...</p>
+                  <div class="loading-spinner"></div>
+                </div>
+                
+                <!-- Case 5: Default placeholder -->
+                <div v-else class="video-placeholder">
+                  <p>加载中或未连接视频源</p>
+                </div>
         </div>
       </div>
       
@@ -281,8 +280,8 @@ import Sidebar from '../components/Sidebar.vue'
 const currentPath = ref('')
 
 // API端点设置
-const SERVER_ROOT_URL = 'http://localhost:5000'
-const API_BASE_URL = `${SERVER_ROOT_URL}/api`
+const SERVER_ROOT_URL = '' // 使用相对路径
+const API_BASE_URL = '/api'
 const DLIB_API_BASE_URL = `${API_BASE_URL}/dlib`; // 新的 Dlib API 基础路径
 const VIDEO_FEED_URL = `${API_BASE_URL}/video_feed`
 
@@ -318,6 +317,17 @@ const registeredUsers = ref([]) // 已注册用户列表
 const pollingIntervalId = ref(null) // 用于轮询的定时器ID
 const videoTaskId = ref(''); // 保存当前视频处理任务的ID
 const webcamImg = ref(null);
+
+// 新增Canvas相关变量
+const rtmpCanvas = ref(null)
+let canvasContext = null
+let currentDetections = []
+
+// 添加Canvas尺寸状态
+const canvasWidth = ref(1280)  // 默认1280
+const canvasHeight = ref(720)  // 默认720
+const originalWidth = ref(1280)  // 原始视频宽度
+const originalHeight = ref(720)  // 原始视频高度
 
 // 新增：RTMP流相关状态
 const showRtmpConnectionModal = ref(false)
@@ -914,33 +924,114 @@ const selectRtmpStream = (streamId) => {
   currentRtmpStream.value = streamId
   // 切换到RTMP流显示
   activeSource.value = 'rtmp'
-  videoSource.value = `${API_BASE_URL}/streams/${streamId}/feed?t=${new Date().getTime()}`
   
-  // 开始接收该流的检测结果
-  connectToRtmpSocket(streamId)
+  // 确保Canvas正确初始化
+  nextTick(() => {
+    if (rtmpCanvas.value) {
+      canvasContext = rtmpCanvas.value.getContext('2d')
+      console.log('Canvas上下文初始化成功')
+      
+      // 在Canvas初始化后再连接Socket
+      setTimeout(() => {
+        connectToRtmpSocket(streamId)
+      }, 100)
+    } else {
+      console.error('Canvas元素未找到')
+    }
+  })
 }
 
 const connectToRtmpSocket = (streamId) => {
+  // 先断开现有连接
   if (rtmpSocket.value) {
     rtmpSocket.value.disconnect()
+    rtmpSocket.value = null
   }
   
-  rtmpSocket.value = io(`${SERVER_ROOT_URL}/rtmp`)
+  console.log(`正在连接RTMP Socket，流ID: ${streamId}`)
   
-  rtmpSocket.value.on('connect', () => {
-    console.log('已连接到RTMP WebSocket')
-    rtmpSocket.value.emit('join_stream', { stream_id: streamId })
+  // 修改连接配置 - 允许WebSocket优先
+  rtmpSocket.value = io('/rtmp', {
+    transports: ['websocket', 'polling'],  // WebSocket优先，polling作为备选
+    forceNew: true,
+    timeout: 20000,
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000
   })
   
-  rtmpSocket.value.on('detection_result', (data) => {
-    if (data.stream_id === currentRtmpStream.value) {
-      // 更新检测结果和告警
-      alerts.value = data.alerts || []
+  rtmpSocket.value.on('connect', () => {
+    console.log(`✅ 已连接到RTMP WebSocket，流ID: ${streamId}`)
+    console.log('Socket ID:', rtmpSocket.value.id)
+    console.log('传输方式:', rtmpSocket.value.io.engine.transport.name)  // 添加这行来检查传输方式
+    rtmpSocket.value.emit('join_stream', { stream_id: streamId })
+    console.log(`📤 已发送join_stream事件，流ID: ${streamId}`)
+  })
+  
+  rtmpSocket.value.on('connect_error', (error) => {
+    console.error('❌ Socket连接错误:', error)
+  })
+  
+  rtmpSocket.value.on('status', (data) => {
+    console.log('📊 RTMP状态:', data)
+  })
+  
+  let frameCount = 0
+  rtmpSocket.value.on('video_frame', (data) => {
+    frameCount++
+    console.log(`📺 收到video_frame事件，帧数: ${frameCount}, 流ID: ${data.stream_id}`)
+    
+    if (data.stream_id === currentRtmpStream.value && canvasContext && rtmpCanvas.value) {
+      // 动态更新Canvas和原始尺寸
+      if (data.original_width && data.original_height) {
+        // 更新原始尺寸
+        originalWidth.value = data.original_width
+        originalHeight.value = data.original_height
+        
+        // 更新Canvas尺寸为原始尺寸
+        canvasWidth.value = data.original_width
+        canvasHeight.value = data.original_height
+        
+        // 更新Canvas元素的实际尺寸
+        rtmpCanvas.value.width = data.original_width
+        rtmpCanvas.value.height = data.original_height
+        
+        console.log(`📐 Canvas尺寸已更新为: ${data.original_width}x${data.original_height}`)
+      }
+      
+      if (data.frame_data) {
+        drawVideoFrame(data.frame_data)
+        console.log(`✅ 成功绘制第${frameCount}帧`)
+      } else {
+        console.error('❌ 收到的帧数据为空')
+      }
     }
   })
   
+  // 接收AI检测结果
+  rtmpSocket.value.on('ai_result', (data) => {
+    console.log('🔍 收到AI检测结果:', data)
+    if (data.stream_id === currentRtmpStream.value) {
+      currentDetections = data.detections || []
+      alerts.value = data.alerts || []
+      
+      if (canvasContext && rtmpCanvas.value) {
+        drawDetectionResults()
+      }
+    }
+  })
+  
+  // 添加测试事件监听
+  rtmpSocket.value.on('test_event', (data) => {
+    console.log('🧪 收到测试事件:', data)
+  })
+  
   rtmpSocket.value.on('error', (error) => {
-    console.error('RTMP WebSocket错误:', error)
+    console.error('❌ RTMP WebSocket错误:', error)
+  })
+  
+  rtmpSocket.value.on('disconnect', (reason) => {
+    console.log('🔌 RTMP WebSocket断开连接，原因:', reason)
   })
 }
 
@@ -1017,6 +1108,137 @@ const deleteRtmpStream = async (streamId) => {
       console.error('删除RTMP流错误:', error)
       alert(`删除流失败: ${error.message}`)
     }
+  }
+}
+
+// 绘制视频帧到Canvas
+const drawVideoFrame = (frameData) => {
+  try {
+    if (!canvasContext || !rtmpCanvas.value) {
+      console.warn('⚠️ Canvas未准备好，跳过帧绘制')
+      return
+    }
+    
+    if (!frameData) {
+      console.error('❌ 帧数据为空')
+      return
+    }
+    
+    // 确保frameData是ArrayBuffer或Uint8Array
+    let binaryData
+    if (frameData instanceof ArrayBuffer) {
+      binaryData = frameData
+    } else if (frameData instanceof Uint8Array) {
+      binaryData = frameData.buffer
+    } else if (typeof frameData === 'object' && frameData.data) {
+      // 处理可能的Buffer对象
+      binaryData = new Uint8Array(frameData.data).buffer
+    } else {
+      console.error('❌ 不支持的帧数据格式:', typeof frameData)
+      return
+    }
+    
+    // 将二进制数据转换为Blob
+    const blob = new Blob([binaryData], { type: 'image/jpeg' })
+    
+    // 创建临时URL
+    const imageUrl = URL.createObjectURL(blob)
+    
+    // 创建Image对象
+    const img = new Image()
+    img.onload = () => {
+      try {
+        // 清除Canvas
+        canvasContext.clearRect(0, 0, rtmpCanvas.value.width, rtmpCanvas.value.height)
+        
+        // 绘制图像到Canvas
+        canvasContext.drawImage(img, 0, 0, rtmpCanvas.value.width, rtmpCanvas.value.height)
+        
+        // 绘制检测结果
+        drawDetectionResults()
+        
+        // 释放临时URL
+        URL.revokeObjectURL(imageUrl)
+      } catch (drawError) {
+        console.error('❌ 绘制图像到Canvas失败:', drawError)
+      }
+    }
+    
+    img.onerror = () => {
+      console.error('❌ 图像加载失败')
+      URL.revokeObjectURL(imageUrl)
+    }
+    
+    img.src = imageUrl
+    
+  } catch (error) {
+    console.error('❌ 绘制视频帧错误:', error)
+  }
+}
+
+// 在Canvas上绘制AI检测结果
+const drawDetectionResults = () => {
+  if (!canvasContext || !currentDetections.length) return
+  
+  try {
+    // 由于现在Canvas尺寸就是原始尺寸，不需要缩放
+    const scaleX = 1  // canvasWidth.value / originalWidth.value
+    const scaleY = 1  // canvasHeight.value / originalHeight.value
+    
+    // 设置绘制样式
+    canvasContext.lineWidth = 2
+    canvasContext.font = '16px Arial'
+    
+    currentDetections.forEach(detection => {
+      // 直接使用原始坐标，不需要缩放
+      const [x1, y1, x2, y2] = detection.bbox
+      const scaledX1 = x1 * scaleX
+      const scaledY1 = y1 * scaleY
+      const scaledX2 = x2 * scaleX
+      const scaledY2 = y2 * scaleY
+      
+      if (detection.type === 'object') {
+        // 绘制目标检测结果
+        canvasContext.strokeStyle = '#00FF00'  // 绿色
+        canvasContext.fillStyle = '#00FF00'
+        
+        // 绘制边框（使用缩放后的坐标）
+        canvasContext.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1)
+        
+        // 绘制标签
+        const label = `${detection.class}: ${detection.confidence.toFixed(2)}`
+        canvasContext.fillText(label, scaledX1, scaledY1 - 5)
+        
+      } else if (detection.type === 'face') {
+        // 绘制人脸识别结果
+        const color = detection.name !== 'Unknown' ? '#00FF00' : '#FF0000'
+        canvasContext.strokeStyle = color
+        canvasContext.fillStyle = color
+        
+        // 绘制边框（使用缩放后的坐标）
+        canvasContext.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1)
+        
+        // 绘制姓名标签
+        const label = detection.name
+        const textMetrics = canvasContext.measureText(label)
+        const textWidth = textMetrics.width
+        const textHeight = 20
+        
+        // 绘制标签背景（使用缩放后的坐标）
+        if (scaledY1 - textHeight < 5) {
+          canvasContext.fillRect(scaledX1, scaledY1, textWidth + 4, textHeight)
+          canvasContext.fillStyle = '#FFFFFF'
+          canvasContext.fillText(label, scaledX1 + 2, scaledY1 + textHeight - 5)
+        } else {
+          canvasContext.fillRect(scaledX1, scaledY1 - textHeight, textWidth + 4, textHeight)
+          canvasContext.fillStyle = '#FFFFFF'
+          canvasContext.fillText(label, scaledX1 + 2, scaledY1 - 5)
+        }
+      }
+    })
+    
+  } catch (error) {
+    console.error('绘制检测结果错误:', error)
   }
 }
 
@@ -1720,5 +1942,14 @@ onUnmounted(() => {
 
 .stream-controls .delete-button:hover {
   background-color: #c82333;
+}
+
+/* 新增Canvas样式 */
+.rtmp-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background-color: #000;
+  border: 1px solid #444;
 }
 </style>
