@@ -40,4 +40,4 @@ if __name__ == "__main__":
     # 初始化数据库
     db_initial.init_database()
 
-    main() 
+    main()
