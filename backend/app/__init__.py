@@ -19,9 +19,24 @@ def create_app():
     os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
     
     app = Flask(__name__)
-    CORS(app)  # 启用跨域支持
+    
+    # 修改CORS配置 - 添加详细的CORS设置
+    CORS(app, 
+         origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # 允许的前端域名
+         allow_headers=["Content-Type", "Authorization", "Access-Control-Allow-Credentials"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         supports_credentials=True
+    )
+    
     swagger = Swagger(app) # 初始化 Flasgger
-    socketio.init_app(app, cors_allowed_origins="*") # 初始化 SocketIO 并处理跨域
+    
+    # 修改Socket.IO初始化配置
+    socketio.init_app(app, 
+        cors_allowed_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        logger=True,
+        engineio_logger=True,
+        async_mode='threading'
+    )
     
     app.config.from_object('app.config.Config')
 
@@ -69,8 +84,6 @@ def create_app():
             # 打印详细的错误堆栈信息，便于调试
             import traceback
             print(traceback.format_exc())
-
-
 
     return app 
 

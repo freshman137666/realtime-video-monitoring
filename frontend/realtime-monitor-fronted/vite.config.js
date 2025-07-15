@@ -15,4 +15,20 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
-}) 
+  server: {
+    proxy: {
+      // 将 /api 请求代理到后端的5000端口
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false
+      },
+      // 将 /socket.io 请求代理到后端的5000端口，并启用WebSocket支持
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        ws: true, // 关键：必须启用WebSocket代理
+        changeOrigin: true
+      }
+    }
+  }
+})
