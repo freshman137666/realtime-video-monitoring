@@ -21,45 +21,24 @@ class RTMPStreamManager:
         self.stop_events: Dict[str, threading.Event] = {}
         
         # 初始化AI模型
-        self.models = {'object': None}
-        self._load_models()
-    
-    def _load_models(self):
-        """加载AI模型"""
         try:
-            # 尝试多个可能的模型路径
-            possible_paths = [
-                '../yolo-Weights/yolov8n.pt',  # 根目录的yolo-Weights
-                'yolo-Weights/yolov8n.pt',     # backend目录的yolo-Weights
-                '../../yolo-Weights/yolov8n.pt', # 从services目录向上两级
-                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'yolo-Weights', 'yolov8n.pt')  # 绝对路径
-            ]
+            from ultralytics import YOLO
+            from app.services.dlib_service import dlib_face_service
             
-            model_loaded = False
-            for model_path in possible_paths:
-                try:
-                    if os.path.exists(model_path):
-                        self.models['object'] = YOLO(model_path)
-                        print(f"✅ YOLO模型加载成功: {model_path}")
-                        model_loaded = True
-                        break
-                except Exception as e:
-                    print(f"尝试加载模型 {model_path} 失败: {e}")
-                    continue
+            # 模型路径
+            BASE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..')
+            MODEL_DIR = os.path.join(BASE_PATH, 'yolo-Weights')
             
-            if not model_loaded:
-                print("⚠️ 本地YOLO模型文件未找到，尝试下载默认模型...")
-                try:
-                    # 使用ultralytics自动下载的默认模型
-                    self.models['object'] = YOLO('yolov8n.pt')  # 这会自动下载到用户目录
-                    print("✅ 默认YOLO模型下载并加载成功")
-                except Exception as e:
-                    print(f"❌ 默认模型下载失败: {e}")
-                    self.models['object'] = None
-                
+            self.models = {
+                'object': YOLO(os.path.join(MODEL_DIR, 'yolov8n.pt')),
+                'face': YOLO(os.path.join(MODEL_DIR, 'yolov8n-face-lindevs.pt'))
+            }
+            self.dlib_service = dlib_face_service
+            print("✅ RTMP AI模型加载成功")
         except Exception as e:
-            print(f"❌ 模型初始化失败: {e}")
-            self.models['object'] = None
+            print(f"❌ RTMP AI模型加载失败: {e}")
+            self.models = {'object': None, 'face': None}
+            self.dlib_service = None
     
     def add_stream(self, config: dict) -> str:
         """添加新的RTMP流"""
@@ -152,27 +131,6 @@ class RTMPStreamManager:
         
         print(f"✅ 流 {stream_id} 启动成功")
 
-    def _validate_rtmp_url(self, rtmp_url: str) -> bool:
-        """验证RTMP URL的有效性（改进版）"""
-        try:
-            # 基本URL格式检查
-            if not rtmp_url.startswith('rtmp://'):
-                return False
-            
-            # 尝试快速连接测试
-            cap = cv2.VideoCapture(rtmp_url)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            # 给连接一些时间
-            time.sleep(1)
-            
-            is_valid = cap.isOpened()
-            cap.release()
-            return is_valid
-        except Exception as e:
-            print(f"RTMP URL验证失败: {e}")
-            return False
-    
     def stop_stream(self, stream_id: str):
         """停止RTMP流处理"""
         if stream_id not in self.streams:
@@ -265,6 +223,9 @@ class RTMPStreamManager:
                 frame_count += 1
                 current_time = time.time()
                 
+                # 创建用于显示的帧副本
+                display_frame = frame.copy()
+                
                 # 每隔几帧进行一次AI检测
                 if frame_count % 5 == 0:  # 每5帧检测一次
                     try:
@@ -272,6 +233,9 @@ class RTMPStreamManager:
                         detection_results = self._perform_detection(
                             frame, stream_config['detection_modes']
                         )
+                        
+                        # 在显示帧上绘制检测结果
+                        self._draw_detection_results(display_frame, detection_results, stream_config['detection_modes'])
                         
                         # 通过WebSocket发送检测结果
                         socketio.emit('detection_result', {
@@ -286,9 +250,9 @@ class RTMPStreamManager:
                     except Exception as e:
                         print(f"检测处理错误: {e}")
                 
-                # 编码帧为JPEG
+                # 编码帧为JPEG（使用带检测结果的显示帧）
                 try:
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    _, buffer = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     frame_data = buffer.tobytes()
                     
                     # 将帧数据放入队列
@@ -318,7 +282,7 @@ class RTMPStreamManager:
             if stream_id in self.streams:
                 self.streams[stream_id]['status'] = 'error'
     
-    def _perform_detection(self, frame: np.ndarray, detection_modes: List[str]) -> dict:
+    def _perform_detection(self, frame, detection_modes):
         """执行AI检测"""
         results = {
             'detections': [],
@@ -326,42 +290,124 @@ class RTMPStreamManager:
         }
         
         try:
-            # 检查模型是否可用
+            # 目标检测
             if 'object_detection' in detection_modes and self.models['object'] is not None:
-                # 目标检测
-                yolo_results = self.models['object'](frame)
-                
-                for result in yolo_results:
+                object_results = self.models['object'](frame)
+                for result in object_results:
                     boxes = result.boxes
                     if boxes is not None:
                         for box in boxes:
                             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                             conf = box.conf[0].cpu().numpy()
                             cls = int(box.cls[0].cpu().numpy())
+                            class_name = self.models['object'].names[cls]
                             
-                            if conf > 0.5:  # 置信度阈值
-                                detection = {
-                                    'type': 'object',
-                                    'class': self.models['object'].names[cls],
-                                    'confidence': float(conf),
-                                    'bbox': [int(x1), int(y1), int(x2), int(y2)]
-                                }
-                                results['detections'].append(detection)
-                                
-                                # 检查是否在危险区域
-                                if self._is_in_danger_zone(x1, y1, x2, y2):
-                                    alert = f"检测到 {detection['class']} 进入危险区域"
-                                    results['alerts'].append(alert)
-            else:
-                # 模型不可用时的处理
-                if 'object_detection' in detection_modes:
-                    # print("⚠️ 目标检测模型不可用，跳过AI检测")  # 避免日志过多
-                    pass
+                            # 检查是否在危险区域
+                            in_danger = self._is_in_danger_zone(x1, y1, x2, y2)
+                            
+                            results['detections'].append({
+                                'type': 'object',
+                                'class': class_name,
+                                'confidence': float(conf),
+                                'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                                'in_danger_zone': in_danger
+                            })
+                            
+                            if in_danger:
+                                results['alerts'].append(f"检测到{class_name}进入危险区域")
             
+            # 人脸检测和识别
+            if 'face_only' in detection_modes and self.models['face'] is not None:
+                face_results = self.models['face'](frame)
+                
+                # 收集所有检测到的人脸边界框
+                face_boxes = []
+                face_confidences = []
+                
+                for result in face_results:
+                    boxes = result.boxes
+                    if boxes is not None:
+                        for box in boxes:
+                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                            conf = box.conf[0].cpu().numpy()
+                            face_boxes.append([int(x1), int(y1), int(x2), int(y2)])
+                            face_confidences.append(float(conf))
+                
+                # 使用Dlib服务进行人脸识别
+                if self.dlib_service is not None and len(face_boxes) > 0:
+                    try:
+                        # 调用正确的方法名和参数格式
+                        recognition_results = self.dlib_service.identify_faces(frame, face_boxes)
+                        
+                        # 处理识别结果
+                        for i, (name, box) in enumerate(recognition_results):
+                            x1, y1, x2, y2 = box
+                            conf = face_confidences[i] if i < len(face_confidences) else 0.0
+                            
+                            results['detections'].append({
+                                'type': 'face',
+                                'name': name,
+                                'confidence': conf,
+                                'bbox': [int(x1), int(y1), int(x2), int(y2)]
+                            })
+                            
+                            if name == "Unknown":
+                                results['alerts'].append("检测到未知人脸")
+                                
+                    except Exception as e:
+                        print(f"人脸识别错误: {e}")
+                        # 如果识别失败，至少返回检测到的人脸框
+                        for i, box in enumerate(face_boxes):
+                            x1, y1, x2, y2 = box
+                            conf = face_confidences[i] if i < len(face_confidences) else 0.0
+                            
+                            results['detections'].append({
+                                'type': 'face',
+                                'name': 'Unknown',
+                                'confidence': conf,
+                                'bbox': [int(x1), int(y1), int(x2), int(y2)]
+                            })
+                            
+                            results['alerts'].append("人脸识别服务异常")
+                                
         except Exception as e:
             print(f"检测执行错误: {e}")
         
         return results
+
+    def _draw_detection_results(self, frame, detection_results, detection_modes):
+        """在帧上绘制检测结果"""
+        try:
+            for detection in detection_results['detections']:
+                bbox = detection['bbox']
+                x1, y1, x2, y2 = bbox
+                
+                if detection['type'] == 'object':
+                    # 绘制目标检测结果
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    label = f"{detection['class']}: {detection['confidence']:.2f}"
+                    cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    
+                elif detection['type'] == 'face':
+                    # 绘制人脸识别结果
+                    name = detection['name']
+                    color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    
+                    # 绘制姓名标签
+                    label = name
+                    (label_width, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                    label_bg_height = 20
+                    
+                    if y1 - label_bg_height < 5:
+                        cv2.rectangle(frame, (x1, y1), (x1 + label_width + 4, y1 + label_bg_height), color, -1)
+                        cv2.putText(frame, label, (x1 + 2, y1 + label_bg_height - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    else:
+                        cv2.rectangle(frame, (x1, y1 - label_bg_height), (x1 + label_width + 4, y1), color, -1)
+                        cv2.putText(frame, label, (x1 + 2, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                        
+        except Exception as e:
+            print(f"绘制检测结果错误: {e}")
     
     def _is_in_danger_zone(self, x1: float, y1: float, x2: float, y2: float) -> bool:
         """检查边界框是否与危险区域重叠"""
