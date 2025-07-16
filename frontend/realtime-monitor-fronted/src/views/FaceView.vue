@@ -120,10 +120,10 @@ import Sidebar from '../components/Sidebar.vue'
 const route = useRoute()
 const currentPath = route.path
 
-// API端点设置（修改前）
-const SERVER_ROOT_URL = 'http://localhost:5000'
-const API_BASE_URL = `${SERVER_ROOT_URL}/api`
-const VIDEO_FEED_URL = `${API_BASE_URL}/video_feed`
+// 删除这些重复的声明（第119-122行）：
+// const SERVER_ROOT_URL = 'http://localhost:5000'
+// const API_BASE_URL = `${SERVER_ROOT_URL}/api`
+// const VIDEO_FEED_URL = `${API_BASE_URL}/video_feed`
 
 // API端点设置（修改后）
 const SERVER_ROOT_URL = '' // 使用相对路径

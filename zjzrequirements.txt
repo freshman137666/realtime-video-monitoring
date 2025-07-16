@@ -120,3 +120,4 @@ opencv-python==4.9.0.80
 numpy==1.26.4
 torch==2.0.1
 torchvision==0.15.2
+python-dotenv==1.1.1
