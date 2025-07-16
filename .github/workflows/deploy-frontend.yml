@@ -30,28 +30,21 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18' # 你可以根据你的项目修改版本号
-          cache: 'npm' # 启用npm依赖缓存，可以加快后续构建速度
-          cache-dependency-path: frontend/package-lock.json # 指定缓存的依据文件
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/realtime-monitor-fronted/package-lock.json
 
-      # 第三步：安装依赖并构建前端项目
-      # 作用：执行标准的Vite项目构建流程
       - name: Install Dependencies and Build
         run: |
-          cd frontend  # 首先进入前端项目的目录
-          npm install  # 安装所有在package.json中定义的依赖
-          npm run build # 执行构建命令，生成dist文件夹
+          cd frontend/realtime-monitor-fronted
+          npm install
+          npm run build
 
-      # 第四步：将构建好的文件部署到你的服务器
-      # 作用：通过SSH连接到你的服务器，将构建产物（dist文件夹里的内容）同步过去
       - name: Deploy to Server via rsync
         uses: Burnett01/rsync-deployments@v7.0.0
         with:
-          # rsync的参数: -a(归档), v(详细), z(压缩), r(递归), --delete(删除服务器上多余的文件)
           switches: -avzr --delete
-          # 要上传的源文件夹路径 (我们构建好的 dist 目录)
-          # 注意末尾的斜杠'/'，它表示只同步文件夹的内容，而不是文件夹本身
-          path: frontend/dist/
+          path: frontend/realtime-monitor-fronted/dist/
           # 下面使用了我们之前在GitHub Secrets中设置好的变量，安全地进行连接
           remote_path: ${{ secrets.TARGET_DIR }}
           remote_host: ${{ secrets.SERVER_HOST }}
