@@ -11,7 +11,7 @@
 </template>
 
 <script setup>
-import TopBar from '../components/Topbar.vue' // 根据实际路径调整
+import TopBar from '../components/TopBar.vue' // 根据实际路径调整
 </script>
 
 <style scoped>
