@@ -1,0 +1,59 @@
+# 工作流的名称，会显示在GitHub的Actions页面上
+name: Deploy Frontend to Server
+
+# 触发工作流的条件
+on:
+  # 当有代码推送到 main 分支时
+  push:
+    branches:
+      - main
+    # 并且，只有当 frontend 目录或其子目录下的文件发生变动时才触发
+    paths:
+      - 'frontend/**'
+
+# 定义工作流中要执行的任务
+jobs:
+  # 定义一个名为 build-and-deploy 的任务
+  build-and-deploy:
+    # 指定运行此任务的虚拟机环境，我们使用最新的Ubuntu系统
+    runs-on: ubuntu-latest
+
+    # 定义这个任务中要执行的一系列步骤
+    steps:
+      # 第一步：检出代码
+      # 作用：将你的仓库代码完整地下载到GitHub提供的临时虚拟机中
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 第二步：设置 Node.js 环境
+      # 作用：在虚拟机里安装指定版本的Node.js，为构建前端项目做准备
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18' # 你可以根据你的项目修改版本号
+          cache: 'npm' # 启用npm依赖缓存，可以加快后续构建速度
+          cache-dependency-path: frontend/package-lock.json # 指定缓存的依据文件
+
+      # 第三步：安装依赖并构建前端项目
+      # 作用：执行标准的Vite项目构建流程
+      - name: Install Dependencies and Build
+        run: |
+          cd frontend  # 首先进入前端项目的目录
+          npm install  # 安装所有在package.json中定义的依赖
+          npm run build # 执行构建命令，生成dist文件夹
+
+      # 第四步：将构建好的文件部署到你的服务器
+      # 作用：通过SSH连接到你的服务器，将构建产物（dist文件夹里的内容）同步过去
+      - name: Deploy to Server via rsync
+        uses: Burnett01/rsync-deployments@v7.0.0
+        with:
+          # rsync的参数: -a(归档), v(详细), z(压缩), r(递归), --delete(删除服务器上多余的文件)
+          switches: -avzr --delete
+          # 要上传的源文件夹路径 (我们构建好的 dist 目录)
+          # 注意末尾的斜杠'/'，它表示只同步文件夹的内容，而不是文件夹本身
+          path: frontend/dist/
+          # 下面使用了我们之前在GitHub Secrets中设置好的变量，安全地进行连接
+          remote_path: ${{ secrets.TARGET_DIR }}
+          remote_host: ${{ secrets.SERVER_HOST }}
+          remote_user: ${{ secrets.SERVER_USERNAME }}
+          remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
