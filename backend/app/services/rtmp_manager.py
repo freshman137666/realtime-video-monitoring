@@ -26,6 +26,7 @@ class RTMPStreamManager:
         
         # 初始化AI模型
 
+
         print("正在初始化AI模型...")
         try:
             from app.services.detection import get_object_model, get_face_model
@@ -44,6 +45,7 @@ class RTMPStreamManager:
                 'object': None,
                 'face': None
             }
+
 
             self.dlib_service = None
     
@@ -138,6 +140,7 @@ class RTMPStreamManager:
         self.streams[stream_id]['last_activity'] = datetime.now().isoformat()
         
         print(f"✅ 流 {stream_id} 启动成功")
+
 
 
     def _frame_reader_loop(self, stream_id: str):
@@ -394,6 +397,7 @@ class RTMPStreamManager:
             print(f"人脸检测错误: {e}")
         
         return results
+
 
 
     def stop_stream(self, stream_id: str):
