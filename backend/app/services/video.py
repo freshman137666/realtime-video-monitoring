@@ -11,6 +11,10 @@ from app.services import system_state
 from app.services.violenceDetect import load_model_safely, process_frame as violence_process_frame, CUSTOM_OBJECTS
 import tensorflow as tf
 from collections import deque
+# --- 新增：导入config模块以访问其状态 ---
+from app.routes import config as config_state
+# --- V4: 修正模块导入问题 ---
+from app.services import danger_zone as danger_zone_service
 
 # 全局变量，用于控制摄像头视频流的循环
 CAMERA_ACTIVE = False
@@ -67,6 +71,9 @@ def video_feed():
                     break
                     
                 frame_count += 1
+
+                # --- V5: 每次处理前都从文件重新加载最新的配置 ---
+                danger_zone_service.load_config()
                 
                 # --- 新增：FPS 计算 ---
                 new_frame_time = time.time()
@@ -131,6 +138,19 @@ def video_feed():
                     cv2.putText(processed_frame, f"violenceProbability: {violence_prob:.4f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
                 
                 elif system_state.DETECTION_MODE == 'object_detection':
+                    # --- V3 混合驱动：在实时视频流中添加危险区域绘制 ---
+                    if not config_state.edit_mode:
+                        # 仅在非编辑模式下由后端绘制危险区域
+                        overlay = processed_frame.copy()
+                        # 确保DANGER_ZONE不为空
+                        # --- V4: 使用模块访问最新的 DANGER_ZONE ---
+                        if danger_zone_service.DANGER_ZONE is not None and len(danger_zone_service.DANGER_ZONE) > 0:
+                            danger_zone_pts = np.array(danger_zone_service.DANGER_ZONE, dtype=np.int32).reshape((-1, 1, 2))
+                            # 使用黄色进行绘制
+                            cv2.fillPoly(overlay, [danger_zone_pts], (0, 255, 255))
+                            cv2.addWeighted(overlay, 0.4, processed_frame, 0.6, 0, processed_frame)
+                            cv2.polylines(processed_frame, [danger_zone_pts], True, (0, 255, 255), 3)
+
                     outputs = object_model_stream.track(processed_frame, persist=True)
                     detection_service.process_object_detection_results(outputs, processed_frame, time_diff, frame_count)
                 
