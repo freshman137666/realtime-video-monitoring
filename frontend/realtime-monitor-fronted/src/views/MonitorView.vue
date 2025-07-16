@@ -294,9 +294,6 @@ import TopBar from '../components/TopBar.vue'
 // 当前路径状态
 const currentPath = ref('')
 
-// 当前路径状态
-const currentPath = ref('')
-
 // API端点设置
 const SERVER_ROOT_URL = 'http://localhost:5000'
 const API_BASE_URL = `${SERVER_ROOT_URL}/api`
