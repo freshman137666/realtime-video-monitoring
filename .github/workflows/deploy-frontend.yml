@@ -41,11 +41,10 @@ jobs:
           npm run build
 
       - name: Deploy to Server via rsync
-        uses: Burnett01/rsync-deployments@v7.0.0
+        uses: Burnett01/rsync-deployments@7.0.2
         with:
           switches: -avzr --delete
           path: frontend/realtime-monitor-fronted/dist/
-          # 下面使用了我们之前在GitHub Secrets中设置好的变量，安全地进行连接
           remote_path: ${{ secrets.TARGET_DIR }}
           remote_host: ${{ secrets.SERVER_HOST }}
           remote_user: ${{ secrets.SERVER_USERNAME }}
