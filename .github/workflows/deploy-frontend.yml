@@ -39,6 +39,11 @@ jobs:
       - name: Install Dependencies and Build
         run: |
           cd frontend/realtime-monitor-fronted
+          
+          # 关键新增：在安装前，设置npm使用淘宝镜像源
+          npm config set registry https://registry.npmmirror.com
+
+          # 继续执行安装和构建
           npm install
           npm run build
 
