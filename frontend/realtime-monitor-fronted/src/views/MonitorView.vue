@@ -1,6 +1,7 @@
 <template>
   <div class="app-container">
     <!-- 顶部导航栏 -->
+     <TopBar />
     <header class="top-bar">
       <div class="header-left">
         <h1>车站实时视频监控系统</h1>
@@ -288,7 +289,10 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue' // 移除 watch
 import io from 'socket.io-client';
 
 // 导入侧边栏组件
-import Sidebar from '../components/Sidebar.vue'
+import TopBar from '../components/TopBar.vue'
+
+// 当前路径状态
+const currentPath = ref('')
 
 // 当前路径状态
 const currentPath = ref('')
