@@ -99,34 +99,47 @@
               <h2>监控视图</h2>
               <div class="video-wrapper">
 
-                <!-- Case 1: Webcam is active -->
-                <img v-if="activeSource === 'webcam'" :src="videoSource" alt="摄像头实时画面" class="webcam-feed" />
-                
-                <!-- Case 2: RTMP流显示 -->
-                <img v-else-if="activeSource === 'rtmp'" :src="videoSource" alt="RTMP流画面" class="webcam-feed" />
-                
-                <!-- Case 3: An upload is active, so we check its type -->
+                <!-- V3: 统一的图像显示，使用 ref 来引用 -->
+                <img 
+                  v-if="activeSource === 'webcam' || activeSource === 'rtmp' || (activeSource === 'upload' && isImageUrl(videoSource))"
+                  ref="displayImage"
+                  :src="videoSource" 
+                  alt="实时或上传画面" 
+                  class="webcam-feed"
+                  @load="onImageLoad"
+                />
 
-                <template v-if="activeSource === 'webcam'">
-                  <img ref="webcamImg" alt="摄像头实时画面" class="webcam-feed" />
-                </template>
+                <!-- 上传的视频 -->
+                <video 
+                  v-else-if="activeSource === 'upload' && isVideoUrl(videoSource)" 
+                  :src="videoSource" 
+                  controls 
+                  autoplay
+                ></video>
 
-                <template v-else-if="activeSource === 'upload'">
-                  <img v-if="isImageUrl(videoSource)" :src="videoSource" alt="上传的图像" />
-                  <video v-else-if="isVideoUrl(videoSource)" :src="videoSource" controls autoplay></video>
-                </template>
-
-
-          <!-- Case 4: Loading -->
+                <!-- 加载状态 -->
           <div v-else-if="activeSource === 'loading'" class="loading-state">
             <p>正在处理文件，请稍候...</p>
             <div class="loading-spinner"></div>
           </div>
           
-          <!-- Case 5: Default placeholder -->
+                <!-- 默认占位符 -->
           <div v-else class="video-placeholder">
             <p>加载中或未连接视频源</p>
           </div>
+  
+                <!-- V3: 用于危险区域交互的Canvas，仅在编辑模式下显示 -->
+                <canvas
+                  v-if="editMode"
+                  ref="interactionCanvas"
+                  class="interaction-canvas"
+                  @mousedown="handleMouseDown"
+                  @mousemove="handleMouseMove"
+                  @mouseup="handleMouseUp"
+                  @mouseleave="handleMouseLeave"
+                  @dblclick="handleDoubleClick"
+                  @contextmenu.prevent="handleRightClick"
+                ></canvas>
         </div>
       </div>
       
@@ -271,8 +284,8 @@
 
 <script setup>
 import { useRoute } from 'vue-router'
-import { ref, onMounted, onUnmounted, nextTick } from 'vue' // 引入 nextTick
-import io from 'socket.io-client'; // 引入 socket.io-client
+import { ref, onMounted, onUnmounted, nextTick } from 'vue' // 移除 watch
+import io from 'socket.io-client';
 
 // 导入侧边栏组件
 import Sidebar from '../components/Sidebar.vue'
@@ -311,13 +324,17 @@ const alerts = ref([])
 const safetyDistance = ref(100)
 const loiteringThreshold = ref(2.0)
 const detectionMode = ref('object_detection') // 新增：检测模式状态
-const originalDangerZone = ref(null)
-// const fileInput = ref(null) // No longer needed
-const faceFileInput = ref(null) // 用于人脸注册的文件输入
+const originalDangerZone = ref([]) // V3: 初始化为空数组
 const registeredUsers = ref([]) // 已注册用户列表
 const pollingIntervalId = ref(null) // 用于轮询的定时器ID
 const videoTaskId = ref(''); // 保存当前视频处理任务的ID
-const webcamImg = ref(null);
+const displayImage = ref(null); // V3: 统一的图像引用
+
+// --- V3: Canvas 和危险区域状态 ---
+const interactionCanvas = ref(null);
+const dangerZone = ref([]); // 用于存储和操作危险区域的点
+const isDragging = ref(false);
+const draggingIndex = ref(-1);
 
 // 新增：RTMP流相关状态
 const showRtmpConnectionModal = ref(false)
@@ -408,6 +425,9 @@ const loadConfig = async () => {
     const data = await apiFetch('/config');
     safetyDistance.value = data.safety_distance;
     loiteringThreshold.value = data.loitering_threshold;
+    // V3: 同时加载危险区域数据，为“进入编辑模式”做准备
+    dangerZone.value = data.danger_zone || [];
+    originalDangerZone.value = JSON.parse(JSON.stringify(dangerZone.value));
     console.log('Configuration loaded:', data);
   } catch (error) {
     // apiFetch中已处理错误
@@ -581,8 +601,8 @@ const connectWebcam = () => {
   stopPolling(); // 如果有正在轮询的任务，先停止
   activeSource.value = 'webcam';
   nextTick(() => {
-    if (webcamImg.value) {
-      webcamImg.value.src = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
+    if (displayImage.value) {
+      displayImage.value.src = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
     }
   });
   startAlertPolling();
@@ -600,7 +620,7 @@ const disconnectWebcam = async () => {
   } finally {
     // 无论如何都更新前端UI
     activeSource.value = '';
-    if (webcamImg.value) webcamImg.value.src = '';
+    videoSource.value = '';
     stopAlertPolling(); // 停止轮询警报
   }
 };
@@ -698,90 +718,128 @@ const pollTaskStatus = async (taskId) => {
 };
 
 
-// 危险区域编辑模式
+// --- V3: 混合驱动的危险区域编辑 ---
+
+// 核心绘制函数
+const drawCanvas = () => {
+  const canvas = interactionCanvas.value;
+  if (!canvas || !editMode.value) return; // 确保只在编辑模式下绘制
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (dangerZone.value.length < 2) return;
+
+  // 绘制多边形区域
+  ctx.beginPath();
+  ctx.moveTo(dangerZone.value[0][0], dangerZone.value[0][1]);
+  for (let i = 1; i < dangerZone.value.length; i++) {
+    ctx.lineTo(dangerZone.value[i][0], dangerZone.value[i][1]);
+  }
+  ctx.closePath();
+  
+  // 编辑时使用更醒目的样式
+  ctx.fillStyle = 'rgba(255, 0, 0, 0.3)'; // 半透明红色填充
+  ctx.fill();
+  ctx.strokeStyle = '#FF0000'; // 纯红色边框
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // 绘制可拖拽的控制点
+  ctx.fillStyle = '#FF0000';
+  dangerZone.value.forEach(point => {
+    ctx.beginPath();
+    ctx.arc(point[0], point[1], 8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+};
+
+// 当图片加载或尺寸变化时，同步Canvas尺寸
+const onImageLoad = () => {
+  nextTick(() => {
+    const img = displayImage.value;
+    const canvas = interactionCanvas.value;
+    if (img && canvas && editMode.value) {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.style.width = `${img.clientWidth}px`;
+      canvas.style.height = `${img.clientHeight}px`;
+      drawCanvas();
+    }
+  });
+};
+
+
+// 危险区域编辑模式切换
 const toggleEditMode = async () => {
   if (!editMode.value) {
-    // 进入编辑模式
+    // --- 进入编辑模式 ---
     try {
-      // 保存原始危险区域以便取消时恢复
-      const response = await fetch(`${API_BASE_URL}/config`)
-      const data = await response.json()
-      originalDangerZone.value = data.danger_zone
-      
-      // 切换到编辑模式
-      await fetch(`${API_BASE_URL}/toggle_edit_mode`, {
+      await apiFetch('/toggle_edit_mode', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ edit_mode: true })
-      })
+      });
       
-      editMode.value = true
+      // 从后端加载最新的数据以开始编辑
+      await loadConfig();
+      
+      editMode.value = true;
+      // 使用nextTick确保canvas已渲染，然后再进行绘制
+      nextTick(() => {
+        onImageLoad(); // 该函数会处理尺寸同步和初次绘制
+      });
+
     } catch (error) {
-      console.error('Error entering edit mode:', error)
-      alert('无法进入编辑模式')
+      console.error('进入编辑模式失败:', error);
+      alert('无法进入编辑模式，请重试。');
     }
   } else {
-    // 退出编辑模式，保存更改
+    // --- 保存并退出编辑模式 ---
     try {
-      // 获取更新后的危险区域
-      const response = await fetch(`${API_BASE_URL}/config`)
-      const data = await response.json()
-      
-      // 保存新的危险区域
-      await fetch(`${API_BASE_URL}/update_danger_zone`, {
+      await apiFetch('/update_danger_zone', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ danger_zone: data.danger_zone })
-      })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ danger_zone: dangerZone.value }),
+      });
       
-      // 退出编辑模式
-      await fetch(`${API_BASE_URL}/toggle_edit_mode`, {
+      // 通知后端退出编辑模式
+      await apiFetch('/toggle_edit_mode', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ edit_mode: false })
-      })
+      });
       
-      editMode.value = false
+      editMode.value = false; // 这将自动隐藏Canvas
+      alert('危险区域已成功保存！');
+
+      // --- 新增：强制刷新视频流以显示更新后的区域 ---
+      if (activeSource.value === 'webcam') {
+        videoSource.value = `${VIDEO_FEED_URL}?t=${new Date().getTime()}`;
+      } else if (activeSource.value === 'rtmp' && currentRtmpStream.value) {
+        videoSource.value = `${API_BASE_URL}/streams/${currentRtmpStream.value}/feed?t=${new Date().getTime()}`;
+      }
+
     } catch (error) {
-      console.error('Error saving danger zone:', error)
-      alert('保存危险区域失败')
+      console.error('保存危险区域失败:', error);
+      alert('保存危险区域失败，请重试。');
     }
   }
 }
 
-// 取消编辑，恢复原始危险区域
+// 取消编辑
 const cancelEdit = async () => {
-  if (!originalDangerZone.value) return
-  
   try {
-    // 恢复原始危险区域
-    await fetch(`${API_BASE_URL}/update_danger_zone`, {
+    // 只需通知后端退出编辑模式即可
+    await apiFetch('/toggle_edit_mode', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ danger_zone: originalDangerZone.value })
-    })
-    
-    // 退出编辑模式
-    await fetch(`${API_BASE_URL}/toggle_edit_mode`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ edit_mode: false })
-    })
-    
-    editMode.value = false
+    });
+    editMode.value = false;
   } catch (error) {
-    console.error('Error canceling edit:', error)
-    alert('取消编辑失败')
+    console.error('取消编辑失败:', error);
+    alert('取消编辑操作失败。');
   }
 }
 
@@ -1020,6 +1078,100 @@ const deleteRtmpStream = async (streamId) => {
   }
 }
 
+// --- V3: Canvas 交互事件处理 ---
+
+// 获取鼠标在Canvas上的坐标（处理缩放）
+const getMouseCoords = (event) => {
+  const canvas = interactionCanvas.value;
+  if (!canvas) return null;
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  const x = (event.clientX - rect.left) * scaleX;
+  const y = (event.clientY - rect.top) * scaleY;
+
+  return { x, y };
+};
+
+// 鼠标按下
+const handleMouseDown = (event) => {
+  if (!editMode.value) return;
+  const coords = getMouseCoords(event);
+  if (!coords) return;
+
+  for (let i = 0; i < dangerZone.value.length; i++) {
+    const point = dangerZone.value[i];
+    const distance = Math.sqrt(Math.pow(coords.x - point[0], 2) + Math.pow(coords.y - point[1], 2));
+    if (distance < 10) {
+      isDragging.value = true;
+      draggingIndex.value = i;
+      return;
+    }
+  }
+};
+
+// 鼠标移动
+const handleMouseMove = (event) => {
+  if (!isDragging.value || draggingIndex.value === -1) return;
+  let coords = getMouseCoords(event);
+  if (!coords) return;
+  
+  const canvas = interactionCanvas.value;
+  coords.x = Math.max(0, Math.min(coords.x, canvas.width));
+  coords.y = Math.max(0, Math.min(coords.y, canvas.height));
+  
+  dangerZone.value[draggingIndex.value] = [coords.x, coords.y];
+  drawCanvas();
+};
+
+// 鼠标松开
+const handleMouseUp = () => {
+  isDragging.value = false;
+  draggingIndex.value = -1;
+};
+
+// 鼠标移出Canvas
+const handleMouseLeave = () => {
+  if (isDragging.value) {
+    isDragging.value = false;
+    draggingIndex.value = -1;
+  }
+};
+
+// 双击添加点
+const handleDoubleClick = (event) => {
+  if (!editMode.value) return;
+  let coords = getMouseCoords(event);
+  if (!coords) return;
+  
+  const canvas = interactionCanvas.value;
+  coords.x = Math.max(0, Math.min(coords.x, canvas.width));
+  coords.y = Math.max(0, Math.min(coords.y, canvas.height));
+
+  dangerZone.value.push([coords.x, coords.y]);
+  drawCanvas();
+};
+
+// 右键删除点
+const handleRightClick = (event) => {
+  if (!editMode.value) return;
+  const coords = getMouseCoords(event);
+  if (!coords) return;
+  
+  for (let i = dangerZone.value.length - 1; i >= 0; i--) {
+    const point = dangerZone.value[i];
+    const distance = Math.sqrt(Math.pow(coords.x - point[0], 2) + Math.pow(coords.y - point[1], 2));
+    if (distance < 10) {
+      dangerZone.value.splice(i, 1);
+      drawCanvas();
+      return;
+    }
+  }
+};
+
+
 // 生命周期钩子
 onMounted(() => {
   loadConfig()
@@ -1173,7 +1325,16 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
+  position: relative; /* 必须是相对定位，作为Canvas绝对定位的基准 */
+}
+
+/* V3: 交互式Canvas的样式 */
+.interaction-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* width 和 height 将由JS根据图像大小设置 */
+  cursor: crosshair;
 }
 
 .webcam-feed {

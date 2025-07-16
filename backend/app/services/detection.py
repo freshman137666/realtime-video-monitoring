@@ -2,7 +2,10 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import os
-from app.services.danger_zone import DANGER_ZONE, SAFETY_DISTANCE, LOITERING_THRESHOLD, TARGET_CLASSES
+# --- V4: 修正模块导入问题 ---
+from app.services import danger_zone as danger_zone_service
+from app.services.danger_zone import SAFETY_DISTANCE, LOITERING_THRESHOLD, TARGET_CLASSES
+# --- 结束 V4 ---
 from app.services.alerts import (
     add_alert, update_loitering_time, reset_loitering_time, get_loitering_time,
     update_detection_time, get_alerts, reset_alerts
@@ -14,6 +17,10 @@ from app.services.smoking_detection_service import SmokingDetectionService
 import time
 from concurrent.futures import ThreadPoolExecutor
 from app.services import violenceDetect
+# --- 新增：导入config模块以访问其状态 ---
+from app.routes import config as config_state
+# --- 结束新增 ---
+
 
 # --- 模型管理 (使用相对路径) ---
 # 路径是相对于 backend/app/services/ 目录的
@@ -125,7 +132,8 @@ def process_image(filepath, uploads_dir):
         res_plotted = detections[0].plot()
         
         # Draw danger zone overlay on the plotted results
-        danger_zone_pts = DANGER_ZONE.reshape((-1, 1, 2))
+        # --- V4: 使用模块访问最新的 DANGER_ZONE ---
+        danger_zone_pts = np.array(danger_zone_service.DANGER_ZONE).reshape((-1, 1, 2))
         overlay = res_plotted.copy()
         cv2.fillPoly(overlay, [danger_zone_pts], (0, 0, 255))
         cv2.addWeighted(overlay, 0.4, res_plotted, 0.6, 0, res_plotted)
@@ -226,6 +234,9 @@ def process_video(filepath, uploads_dir):
         # 计算时间差
         time_diff = update_detection_time()
         
+        # --- V5: 每次处理前都从文件重新加载最新的配置 ---
+        danger_zone_service.load_config()
+        
         # --- 检测模式处理 ---
         processed_frame = frame.copy() # 复制一份用于处理
 
@@ -234,21 +245,25 @@ def process_video(filepath, uploads_dir):
             # 执行目标追踪
             results = object_model_local.track(processed_frame, persist=True)
             
-            # --- 绘图顺序调整 ---
-            # 1. 首先，绘制危险区域的半透明叠加层作为背景
-            overlay = processed_frame.copy()
-            danger_zone_pts = DANGER_ZONE.reshape((-1, 1, 2))
-            cv2.fillPoly(overlay, [danger_zone_pts], (0, 0, 255))
-            cv2.addWeighted(overlay, 0.4, processed_frame, 0.6, 0, processed_frame)
-            cv2.polylines(processed_frame, [danger_zone_pts], True, (0, 0, 255), 3)
+            # --- V3 混合驱动：仅在非编辑模式下由后端绘制 ---
+            if not config_state.edit_mode:
+                # 1. 首先，绘制危险区域的半透明叠加层作为背景
+                overlay = processed_frame.copy()
+                # --- V4: 使用模块访问最新的 DANGER_ZONE ---
+                danger_zone_pts = np.array(danger_zone_service.DANGER_ZONE).reshape((-1, 1, 2))
+                # 使用更醒目的颜色
+                cv2.fillPoly(overlay, [danger_zone_pts], (0, 255, 255)) # 黄色填充
+                cv2.addWeighted(overlay, 0.4, processed_frame, 0.6, 0, processed_frame)
+                cv2.polylines(processed_frame, [danger_zone_pts], True, (0, 255, 255), 3) # 黄色边框
             
-            # 在危险区域中添加文字
-            danger_zone_center = np.mean(DANGER_ZONE, axis=0, dtype=np.int32)
-            cv2.putText(processed_frame, "Danger Zone", 
-                        (danger_zone_center[0] - 60, danger_zone_center[1]),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+                # 在危险区域中添加文字
+                # --- V4: 使用模块访问最新的 DANGER_ZONE ---
+                danger_zone_center = np.mean(danger_zone_service.DANGER_ZONE, axis=0, dtype=np.int32)
+                cv2.putText(processed_frame, "Danger Zone", 
+                            (danger_zone_center[0] - 60, danger_zone_center[1]),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
             
-            # 2. 然后，在已经有了危险区域的帧上，处理检测结果（绘制追踪框、标签等前景）
+            # 2. 然后，处理检测结果（绘制追踪框、标签等前景）
             process_object_detection_results(results, processed_frame, time_diff, frame_count)
         
         elif system_state.DETECTION_MODE == 'fall_detection':
@@ -376,6 +391,16 @@ def process_object_detection_results(results, frame, time_diff, frame_count):
     处理通用目标检测结果（危险区域、徘徊等）
     (这是您之前的 process_detection_results 函数，已重命名并保留)
     """
+    # --- V3 混合驱动：在编辑模式下，跳过所有危险区域的闯入/靠近检测逻辑 ---
+    if config_state.edit_mode:
+        # 仍然需要绘制检测框，所以我们只跳过危险区域的部分
+        if results and results[0].boxes is not None and hasattr(results[0].boxes, 'id') and results[0].boxes.id is not None:
+            boxes = results[0].boxes.cpu().numpy()
+            # 绘制YOLOv8的默认结果（框和ID）
+            frame[:] = results[0].plot()
+        return # 直接返回，不执行后续的危险区域判断
+    # --- 结束新增 ---
+
     # 如果有追踪结果，在画面上显示追踪ID和危险区域告警
     if hasattr(results[0], 'boxes') and hasattr(results[0].boxes, 'id') and results[0].boxes.id is not None:
         boxes = results[0].boxes.xyxy.cpu().numpy()
@@ -398,10 +423,12 @@ def process_object_detection_results(results, frame, time_diff, frame_count):
             foot_point = (int((x1 + x2) / 2), int(y2))
             
             # 检查是否在危险区域内
-            in_danger_zone = point_in_polygon(foot_point, DANGER_ZONE)
+            # --- V4: 使用模块访问最新的 DANGER_ZONE ---
+            in_danger_zone = point_in_polygon(foot_point, danger_zone_service.DANGER_ZONE)
             
             # 计算到危险区域的距离
-            distance = distance_to_polygon(foot_point, DANGER_ZONE)
+            # --- V4: 使用模块访问最新的 DANGER_ZONE ---
+            distance = distance_to_polygon(foot_point, danger_zone_service.DANGER_ZONE)
             
             # 确定标签颜色和告警状态
             label_color = (0, 255, 0)  # 默认绿色
@@ -646,9 +673,10 @@ def draw_distance_line(frame, foot_point, distance):
     # 找到危险区域上最近的点
     min_dist = float('inf')
     closest_point = None
-    for i in range(len(DANGER_ZONE)):
-        p1 = DANGER_ZONE[i]
-        p2 = DANGER_ZONE[(i + 1) % len(DANGER_ZONE)]
+    # --- V4: 使用模块访问最新的 DANGER_ZONE ---
+    for i in range(len(danger_zone_service.DANGER_ZONE)):
+        p1 = danger_zone_service.DANGER_ZONE[i]
+        p2 = danger_zone_service.DANGER_ZONE[(i + 1) % len(danger_zone_service.DANGER_ZONE)]
         
         # 计算点到线段的最近点
         line_vec = p2 - p1
