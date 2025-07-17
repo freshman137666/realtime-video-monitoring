@@ -30,18 +30,29 @@ SNAPSHOTS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads', '
 os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
 
 
-# --- 模型管理 (使用相对路径) ---
-# 路径是相对于 backend/app/services/ 目录的
-# '..' 回退到 backend/app/
-# '../..' 回退到 backend/
-# '../../..' 回退到项目根目录
-BASE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', '..')
-MODEL_DIR = os.path.join(BASE_PATH, 'yolo-Weights') # 统一存放在 yolo-Weights 文件夹
+# --- 模型管理 (使用绝对路径确保正确性) ---
+# 获取项目根目录的绝对路径
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+MODEL_DIR = os.path.join(BASE_PATH, 'yolo-Weights')
+
+# 添加路径验证和调试信息
+print(f"项目根目录: {BASE_PATH}")
+print(f"模型目录: {MODEL_DIR}")
+print(f"模型目录存在: {os.path.exists(MODEL_DIR)}")
+
+if not os.path.exists(MODEL_DIR):
+    print(f"警告: 模型目录不存在: {MODEL_DIR}")
+    print("请确保已解压yolo-Weights.zip文件")
 
 POSE_MODEL_PATH = os.path.join(MODEL_DIR, "yolov8s-pose.pt")
 OBJECT_MODEL_PATH = os.path.join(MODEL_DIR, "yolov8n.pt")
 FACE_MODEL_PATH = os.path.join(MODEL_DIR, "yolov8n-face-lindevs.pt")
 SMOKING_MODEL_PATH = os.path.join(MODEL_DIR, "smoking_detection.pt")
+
+# 打印模型文件状态
+print(f"人脸模型路径: {FACE_MODEL_PATH}")
+print(f"人脸模型存在: {os.path.exists(FACE_MODEL_PATH)}")
+print(f"目标检测模型存在: {os.path.exists(OBJECT_MODEL_PATH)}")
 
 
 # 全局变量来持有加载的模型
@@ -539,9 +550,14 @@ def process_object_detection_results(results, frame, time_diff, frame_count):
             # --- V4: 使用模块访问最新的 DANGER_ZONE ---
             distance = distance_to_polygon(foot_point, danger_zone_service.DANGER_ZONE)
             
-            # 确定标签颜色和告警状态
+            # 确定标签颜色和告警状态 - 优化后的多级预警机制
             label_color = (0, 255, 0)  # 默认绿色
             alert_status = None
+            
+            # 定义多级距离阈值
+            EARLY_WARNING_DISTANCE = danger_zone_service.SAFETY_DISTANCE * 3  # 早期预警距离
+            WARNING_DISTANCE = danger_zone_service.SAFETY_DISTANCE * 2        # 警告距离
+            CRITICAL_DISTANCE = danger_zone_service.SAFETY_DISTANCE           # 临界距离
             
             # 如果在危险区域内，更新停留时间
             if in_danger_zone:
@@ -581,56 +597,61 @@ def process_object_detection_results(results, frame, time_diff, frame_count):
                 # 如果不在区域内，重置停留时间
                 reset_loitering_time(id)
 
-                # 如果距离小于安全距离，根据距离设置颜色从绿色到黄色
-                if distance < SAFETY_DISTANCE:
-                    # 计算距离比例
-                    ratio = distance / SAFETY_DISTANCE
-                    # 从黄色(0,255,255)到绿色(0,255,0)渐变
-                    label_color = (0, 255, int(255 * (1 - ratio)))
+                # 多级距离预警系统
+                if distance < CRITICAL_DISTANCE:
+                    # 临界距离：红橙色警告
+                    ratio = distance / CRITICAL_DISTANCE
+                    # 从红橙色(0,69,255)到橙色(0,165,255)渐变
+                    label_color = (0, int(69 + 96 * ratio), 255)
                     
-                    alert_status = f"ID:{id} ({display_name}) too close to danger zone ({distance:.1f}px)"
-                    snapshot_path = save_snapshot(frame) # 保存快照
+                    alert_status = f"ID:{id} ({display_name}) critically close to danger zone ({distance:.1f}px)"
+                    snapshot_path = save_snapshot(frame)
                     
-                    # 同时添加内存告警和数据库告警
                     add_alert(alert_status,
-                             event_type="proximity_warning",
-                             details=f"人员 {display_name} 过于接近危险区域，距离 {distance:.1f} 像素",
+                             event_type="critical_proximity_warning",
+                             details=f"人员 {display_name} 极度接近危险区域，距离 {distance:.1f} 像素",
                              snapshot_path=snapshot_path)
                     
-                    # 创建数据库告警 - 使用try/except包装以避免应用上下文错误
-                    try:
-                        from app import create_app
-                        app = create_app()
-                        with app.app_context():
-                            create_alert(
-                                event_type="proximity_warning",
-                                details=f"人员 {display_name} 过于接近危险区域，距离 {distance:.1f} 像素",
-                                frame_snapshot_path=snapshot_path
-                            )
-                    except Exception as e:
-                        print(f"创建数据库告警失败: {e}")
+                elif distance < WARNING_DISTANCE:
+                    # 警告距离：橙黄色警告
+                    ratio = (distance - CRITICAL_DISTANCE) / (WARNING_DISTANCE - CRITICAL_DISTANCE)
+                    # 从橙色(0,165,255)到黄色(0,255,255)渐变
+                    label_color = (0, int(165 + 90 * ratio), 255)
+                    
+                    alert_status = f"ID:{id} ({display_name}) approaching danger zone ({distance:.1f}px)"
+                    
+                elif distance < EARLY_WARNING_DISTANCE:
+                    # 早期预警距离：黄绿色提示
+                    ratio = (distance - WARNING_DISTANCE) / (EARLY_WARNING_DISTANCE - WARNING_DISTANCE)
+                    # 从黄色(0,255,255)到浅绿色(0,255,128)渐变
+                    label_color = (0, 255, int(255 - 127 * ratio))
+                    
+                    # 早期预警不生成告警，只改变颜色
+                else:
+                    # 安全距离：绿色
+                    label_color = (0, 255, 0)
             
             # 在每个目标上方显示ID和类别
             label = f"ID:{id} {display_name}"
 
             if in_danger_zone:
                 label += f" time:{get_loitering_time(id):.1f}s"
-            elif distance < SAFETY_DISTANCE:
+            elif distance < EARLY_WARNING_DISTANCE:
                 label += f" dist:{distance:.1f}px"
             
-            # 根据危险程度调整边框粗细
+            # 根据危险程度调整边框粗细 - 优化版本
             thickness = 2  # 默认粗细
             if in_danger_zone:
                 # 在危险区域内，根据停留时间增加边框粗细
-                thickness = max(2, int(4 * min(1.0, get_loitering_time(id) / LOITERING_THRESHOLD)))
+                thickness = max(3, int(6 * min(1.0, get_loitering_time(id) / LOITERING_THRESHOLD)))
                 
                 # 如果停留时间超过阈值，添加警告标记
                 if get_loitering_time(id) >= LOITERING_THRESHOLD:
                     # 在目标上方绘制警告三角形
-                    triangle_height = 20
-                    triangle_base = 20
+                    triangle_height = 25
+                    triangle_base = 25
                     triangle_center_x = int((x1 + x2) / 2)
-                    triangle_top_y = int(y1) - 25
+                    triangle_top_y = int(y1) - 30
                     
                     triangle_pts = np.array([
                         [triangle_center_x - triangle_base//2, triangle_top_y + triangle_height],
@@ -639,15 +660,21 @@ def process_object_detection_results(results, frame, time_diff, frame_count):
                     ], np.int32)
                     
                     cv2.fillPoly(frame, [triangle_pts], (0, 0, 255))  # 红色填充
-                    cv2.polylines(frame, [triangle_pts], True, (0, 0, 0), 1)  # 黑色边框
+                    cv2.polylines(frame, [triangle_pts], True, (0, 0, 0), 2)  # 黑色边框
                     
                     # 在三角形中绘制感叹号
                     cv2.putText(frame, "!", 
-                                (triangle_center_x - 3, triangle_top_y + triangle_height - 5), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            elif distance < SAFETY_DISTANCE:
-                # 不在危险区域但接近时，根据距离增加边框粗细
-                thickness = max(1, int(3 * (1 - distance / SAFETY_DISTANCE)))
+                                (triangle_center_x - 4, triangle_top_y + triangle_height - 6), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            elif distance < CRITICAL_DISTANCE:
+                # 临界距离时增加边框粗细
+                thickness = max(2, int(5 * (1 - distance / CRITICAL_DISTANCE)))
+            elif distance < WARNING_DISTANCE:
+                # 警告距离时适度增加边框粗细
+                thickness = max(2, int(3 * (1 - (distance - CRITICAL_DISTANCE) / (WARNING_DISTANCE - CRITICAL_DISTANCE))))
+            elif distance < EARLY_WARNING_DISTANCE:
+                # 早期预警距离时轻微增加边框粗细
+                thickness = 2
             
             # 绘制边框
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), label_color, thickness)
@@ -664,8 +691,8 @@ def process_object_detection_results(results, frame, time_diff, frame_count):
             foot_point = (int((x1 + x2) / 2), int(y2))
             cv2.circle(frame, foot_point, 5, label_color, -1)
             
-            # 如果不在危险区域内但距离小于安全距离的2倍，绘制到危险区域的连接线
-            if not in_danger_zone and distance < SAFETY_DISTANCE * 2:
+            # 如果不在危险区域内但距离小于早期预警距离，绘制到危险区域的连接线
+            if not in_danger_zone and distance < EARLY_WARNING_DISTANCE:
                 draw_distance_line(frame, foot_point, distance)
 
 def process_pose_estimation_results(results, frame, time_diff, frame_count):
